@@ -1656,7 +1656,7 @@ export function checkEditableInternalPath(
       updatedInput: input,
       decisionReason: {
         type: 'other',
-        reason: 'OpenClaude commit message file is allowed for writing',
+        reason: 'OPEN MATRIX commit message file is allowed for writing',
       },
     }
   }

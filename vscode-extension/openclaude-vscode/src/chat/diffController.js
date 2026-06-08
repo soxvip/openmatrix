@@ -56,7 +56,7 @@ async function openDiff({ filePath, original, modified, toolUseId }) {
   const originalUri = storeContent(`original-${id}`, original || '');
   const modifiedUri = storeContent(`modified-${id}`, modified || '');
   const shortName = filePath ? filePath.split(/[\\/]/).pop() : 'file';
-  const title = `${shortName} (OpenClaude Diff)`;
+  const title = `${shortName} (OpenMatrix Diff)`;
 
   await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, title);
 }

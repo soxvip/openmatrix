@@ -27,32 +27,32 @@ function renderChatHtml({ nonce, platform }) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     :root {
-      --oc-bg: #0a0908;
-      --oc-panel: #110d0c;
-      --oc-panel-strong: #17110f;
-      --oc-panel-soft: #1d1512;
-      --oc-border: #645041;
-      --oc-border-soft: rgba(220,195,170,0.14);
-      --oc-text: #f7efe5;
-      --oc-text-dim: #dcc3aa;
-      --oc-text-soft: #aa9078;
-      --oc-accent: #d77757;
-      --oc-accent-bright: #f09464;
-      --oc-accent-soft: rgba(240,148,100,0.18);
-      --oc-positive: #e8b86b;
-      --oc-warning: #f3c969;
-      --oc-critical: #ff8a6c;
-      --oc-focus: #ffd3a1;
-      --oc-user-bg: rgba(240,148,100,0.12);
-      --oc-user-border: rgba(240,148,100,0.28);
+      --oc-bg: #050505;
+      --oc-panel: #07140b;
+      --oc-panel-strong: #0b1f10;
+      --oc-panel-soft: #0e2a15;
+      --oc-border: #1d8f3a;
+      --oc-border-soft: rgba(0,255,65,0.16);
+      --oc-text: #eaffef;
+      --oc-text-dim: #9ee6ad;
+      --oc-text-soft: #6fbf7f;
+      --oc-accent: #00cc33;
+      --oc-accent-bright: #00ff41;
+      --oc-accent-soft: rgba(0,255,65,0.18);
+      --oc-positive: #00ff41;
+      --oc-warning: #b7ff00;
+      --oc-critical: #ff4d4d;
+      --oc-focus: #00ff41;
+      --oc-user-bg: rgba(0,255,65,0.12);
+      --oc-user-border: rgba(0,255,65,0.28);
       --oc-assistant-bg: rgba(255,255,255,0.03);
-      --oc-assistant-border: rgba(220,195,170,0.10);
-      --oc-code-bg: #1a1310;
-      --oc-code-border: rgba(220,195,170,0.12);
-      --oc-tool-bg: rgba(232,184,107,0.06);
-      --oc-tool-border: rgba(232,184,107,0.22);
-      --oc-perm-bg: rgba(255,138,108,0.08);
-      --oc-perm-border: rgba(255,138,108,0.35);
+      --oc-assistant-border: rgba(0,255,65,0.10);
+      --oc-code-bg: #08160d;
+      --oc-code-border: rgba(0,255,65,0.12);
+      --oc-tool-bg: rgba(0,255,65,0.06);
+      --oc-tool-border: rgba(0,255,65,0.22);
+      --oc-perm-bg: rgba(255,77,77,0.08);
+      --oc-perm-border: rgba(255,77,77,0.35);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
@@ -99,7 +99,7 @@ function renderChatHtml({ nonce, platform }) {
     }
     .header-btn:hover { border-color: var(--oc-accent); color: var(--oc-text); }
     .header-btn.danger { border-color: var(--oc-critical); color: var(--oc-critical); }
-    .header-btn.danger:hover { background: rgba(255,138,108,0.12); }
+    .header-btn.danger:hover { background: rgba(255,77,77,0.12); }
     #abortBtn { display: none; }
 
     /* ── Status bar ── */
@@ -138,7 +138,7 @@ function renderChatHtml({ nonce, platform }) {
     }
     .messages::-webkit-scrollbar { width: 6px; }
     .messages::-webkit-scrollbar-track { background: transparent; }
-    .messages::-webkit-scrollbar-thumb { background: rgba(220,195,170,0.18); border-radius: 3px; }
+    .messages::-webkit-scrollbar-thumb { background: rgba(0,255,65,0.18); border-radius: 3px; }
 
     /* ── Welcome screen ── */
     .welcome {
@@ -268,7 +268,7 @@ function renderChatHtml({ nonce, platform }) {
       color: var(--oc-text-dim);
     }
     .code-block::-webkit-scrollbar { height: 4px; }
-    .code-block::-webkit-scrollbar-thumb { background: rgba(220,195,170,0.2); border-radius: 2px; }
+    .code-block::-webkit-scrollbar-thumb { background: rgba(0,255,65,0.2); border-radius: 2px; }
 
     /* keyword highlighting */
     .hl-keyword { color: #c586c0; }
@@ -368,13 +368,13 @@ function renderChatHtml({ nonce, platform }) {
       margin-top: 6px;
       border: 1px solid var(--oc-accent);
       border-radius: 6px;
-      background: rgba(240,148,100,0.08);
+      background: rgba(0,255,65,0.08);
       color: var(--oc-accent-bright);
       padding: 4px 10px;
       font-size: 11px;
       cursor: pointer;
     }
-    .tool-diff-btn:hover { background: rgba(240,148,100,0.16); }
+    .tool-diff-btn:hover { background: rgba(0,255,65,0.16); }
 
     /* ── Permission card ── */
     .perm-card {
@@ -408,18 +408,18 @@ function renderChatHtml({ nonce, platform }) {
       border: 1px solid;
     }
     .perm-btn.allow {
-      background: rgba(232,184,107,0.14);
+      background: rgba(0,255,65,0.14);
       border-color: var(--oc-positive);
       color: var(--oc-positive);
     }
     .perm-btn.deny {
-      background: rgba(255,138,108,0.1);
+      background: rgba(255,77,77,0.1);
       border-color: var(--oc-critical);
       color: var(--oc-critical);
     }
     .perm-btn.allow-session {
-      background: rgba(232,184,107,0.08);
-      border-color: rgba(232,184,107,0.4);
+      background: rgba(0,255,65,0.08);
+      border-color: rgba(0,255,65,0.4);
       color: var(--oc-text-dim);
     }
     .perm-btn:hover { filter: brightness(1.15); }
@@ -533,7 +533,7 @@ function renderChatHtml({ nonce, platform }) {
       height: 36px;
       border-radius: 10px;
       border: 1px solid var(--oc-accent);
-      background: linear-gradient(135deg, rgba(240,148,100,0.2), rgba(215,119,87,0.12));
+      background: linear-gradient(135deg, rgba(0,255,65,0.2), rgba(0,204,51,0.12));
       color: var(--oc-accent-bright);
       cursor: pointer;
       font-size: 16px;
@@ -542,7 +542,7 @@ function renderChatHtml({ nonce, platform }) {
       justify-content: center;
       flex-shrink: 0;
     }
-    .send-btn:hover { background: rgba(240,148,100,0.25); }
+    .send-btn:hover { background: rgba(0,255,65,0.25); }
     .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* ── Session list overlay ── */
@@ -602,7 +602,7 @@ function renderChatHtml({ nonce, platform }) {
 </head>
 <body>
   <div class="chat-header">
-    <div class="brand">Open<span class="brand-accent">Claude</span></div>
+    <div class="brand">Open<span class="brand-accent">Matrix</span></div>
     <button class="header-btn" id="historyBtn" title="Session history">History</button>
     <button class="header-btn" id="newChatBtn" title="New chat">+ New</button>
     <button class="header-btn danger" id="abortBtn" title="Abort generation">Stop</button>
@@ -615,7 +615,7 @@ function renderChatHtml({ nonce, platform }) {
 
   <div class="messages" id="messages">
     <div class="welcome" id="welcomeScreen">
-      <div class="welcome-title">Open<span class="accent">Claude</span></div>
+      <div class="welcome-title">Open<span class="accent">Matrix</span></div>
       <div class="welcome-sub">Ask a question, request a code change, or start a new task.</div>
       <div class="welcome-hint">Press <kbd>${escapeHtml(modKey)}+L</kbd> to focus input</div>
     </div>
@@ -636,7 +636,7 @@ function renderChatHtml({ nonce, platform }) {
   </div>
 
   <div class="input-area">
-    <textarea id="chatInput" placeholder="Message OpenClaude..." rows="1"></textarea>
+    <textarea id="chatInput" placeholder="Message OpenMatrix..." rows="1"></textarea>
     <button class="send-btn" id="sendBtn" title="Send message">&#x27A4;</button>
   </div>
 

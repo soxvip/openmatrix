@@ -777,7 +777,7 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Ordered list of providerProfile ids. When the active provider returns a rate-limit ' +
-            'or quota error, OpenClaude advances to the next profile in this list (starting after ' +
+            'or quota error, OPEN MATRIX advances to the next profile in this list (starting after ' +
             'the currently-active id) and retries the turn. ' +
             'Example: ["provider_anthropic", "provider_openai", "provider_ollama"]',
         ),

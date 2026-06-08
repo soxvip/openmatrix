@@ -12,13 +12,13 @@ const {
   resolveCommandCheckPath,
 } = require('./state');
 const { buildControlCenterViewModel } = require('./presentation');
-const { ChatController, OpenClaudeChatViewProvider, OpenClaudeChatPanelManager } = require('./chat/chatProvider');
+const { ChatController, OpenMatrixChatViewProvider, OpenMatrixChatPanelManager } = require('./chat/chatProvider');
 const { SessionManager } = require('./chat/sessionManager');
 const { DiffContentProvider, SCHEME: DIFF_SCHEME } = require('./chat/diffController');
 
-const OPENCLAUDE_REPO_URL = 'https://github.com/Gitlawb/openclaude';
-const OPENCLAUDE_SETUP_URL = 'https://github.com/Gitlawb/openclaude/blob/main/README.md#quick-start';
-const PROFILE_FILE_NAME = '.openclaude-profile.json';
+const OPEN_MATRIX_REPO_URL = 'https://github.com/Gitlawb/open-matrix';
+const OPEN_MATRIX_SETUP_URL = 'https://github.com/Gitlawb/open-matrix/blob/main/README.md#quick-start';
+const PROFILE_FILE_NAME = '.open-matrix-profile.json';
 
 function escapeHtml(value) {
   return String(value)
@@ -103,7 +103,7 @@ function resolveLaunchTargets({ activeFilePath, workspacePath, workspaceSourceLa
     return {
       projectAwareCwd: activeFileDirectory,
       projectAwareCwdLabel: activeFileDirectory,
-      projectAwareSourceLabel: 'active file directory',
+      projectAwareSourceLabel: 'diretório do arquivo ativo',
       workspaceRootCwd: workspacePath || null,
       workspaceRootCwdLabel: workspacePath || 'No workspace open',
       launchActionsShareTarget: false,
@@ -148,20 +148,20 @@ function getWorkspaceSourceLabel(source) {
     case 'first-workspace':
       return 'first workspace folder';
     default:
-      return 'no workspace open';
+      return 'nenhum espaço de trabalho aberto';
   }
 }
 
 function getProviderSourceLabel(source) {
   switch (source) {
     case 'profile':
-      return 'saved profile';
+      return 'perfil salvo';
     case 'env':
-      return 'environment';
+      return 'ambiente';
     case 'shim':
-      return 'launch setting';
+      return 'configuração de inicialização';
     default:
-      return 'unknown';
+      return 'desconhecido';
   }
 }
 
@@ -169,8 +169,8 @@ function readWorkspaceProfile(profilePath) {
   if (!profilePath || !fs.existsSync(profilePath)) {
     return {
       profile: null,
-      statusLabel: 'Missing',
-      statusHint: `${PROFILE_FILE_NAME} not found in the workspace root`,
+      statusLabel: 'Ausente',
+      statusHint: `${PROFILE_FILE_NAME} não encontrado na raiz do espaço de trabalho`,
       filePath: null,
     };
   }
@@ -181,32 +181,32 @@ function readWorkspaceProfile(profilePath) {
     if (!profile) {
       return {
         profile: null,
-        statusLabel: 'Invalid',
-        statusHint: `${profilePath} has invalid JSON or an unsupported profile`,
+        statusLabel: 'Inválido',
+        statusHint: `${profilePath} tem JSON inválido ou perfil sem suporte`,
         filePath: profilePath,
       };
     }
 
     return {
       profile,
-      statusLabel: 'Found',
+      statusLabel: 'Encontrado',
       statusHint: profilePath,
       filePath: profilePath,
     };
   } catch (error) {
     return {
       profile: null,
-      statusLabel: 'Unreadable',
-      statusHint: `${profilePath} (${error instanceof Error ? error.message : 'read failed'})`,
+      statusLabel: 'Ilegível',
+      statusHint: `${profilePath} (${error instanceof Error ? error.message : 'falha na leitura'})`,
       filePath: profilePath,
     };
   }
 }
 
 async function collectControlCenterState() {
-  const configured = vscode.workspace.getConfiguration('openclaude');
-  const launchCommand = configured.get('launchCommand', 'openclaude');
-  const terminalName = configured.get('terminalName', 'OpenClaude');
+  const configured = vscode.workspace.getConfiguration('open-matrix');
+  const launchCommand = configured.get('launchCommand', 'open-matrix');
+  const terminalName = configured.get('terminalName', 'OPEN MATRIX');
   const shimEnabled = configured.get('useOpenAIShim', false);
   const executable = getExecutableFromCommand(launchCommand);
   const launchWorkspace = resolveLaunchWorkspace();
@@ -262,11 +262,11 @@ async function collectControlCenterState() {
   };
 }
 
-async function launchOpenClaude(options = {}) {
+async function launchOpenMatrix(options = {}) {
   const { requireWorkspace = false } = options;
-  const configured = vscode.workspace.getConfiguration('openclaude');
-  const launchCommand = configured.get('launchCommand', 'openclaude');
-  const terminalName = configured.get('terminalName', 'OpenClaude');
+  const configured = vscode.workspace.getConfiguration('open-matrix');
+  const launchCommand = configured.get('launchCommand', 'open-matrix');
+  const terminalName = configured.get('terminalName', 'OPEN MATRIX');
   const shimEnabled = configured.get('useOpenAIShim', false);
   const executable = getExecutableFromCommand(launchCommand);
   const launchWorkspace = resolveLaunchWorkspace();
@@ -291,15 +291,15 @@ async function launchOpenClaude(options = {}) {
 
   if (!installed) {
     const action = await vscode.window.showErrorMessage(
-      `OpenClaude command not found: ${executable}. Install it with: npm install -g @gitlawb/openclaude@latest`,
-      'Open Setup Guide',
-      'Open Repository',
+      `OPEN MATRIX command not found: ${executable}. Install it with: npm install -g @gitlawb/open-matrix@latest`,
+      'Abrir Guia de Configuração',
+      'Abrir Repositório',
     );
 
     if (action === 'Open Setup Guide') {
-      await vscode.env.openExternal(vscode.Uri.parse(OPENCLAUDE_SETUP_URL));
+      await vscode.env.openExternal(vscode.Uri.parse(OPEN_MATRIX_SETUP_URL));
     } else if (action === 'Open Repository') {
-      await vscode.env.openExternal(vscode.Uri.parse(OPENCLAUDE_REPO_URL));
+      await vscode.env.openExternal(vscode.Uri.parse(OPEN_MATRIX_REPO_URL));
     }
 
     return;
@@ -329,7 +329,7 @@ async function openWorkspaceProfile() {
 
   if (!state.workspaceProfilePath) {
     await vscode.window.showInformationMessage(
-      `No ${PROFILE_FILE_NAME} file was found for the current workspace.`,
+      `Nenhum arquivo ${PROFILE_FILE_NAME} foi encontrado para o espaço de trabalho atual.`,
     );
     return;
   }
@@ -423,7 +423,7 @@ function getWorkspaceRootActionDetail(status, fallbackDetail) {
   }
 
   if (status.launchActionsShareTargetReason === 'relative-launch-command') {
-    return `Same workspace-root target as Launch OpenClaude because the relative command resolves from the workspace root · ${status.workspaceRootCwdLabel}`;
+    return `Same workspace-root target as Launch OPEN MATRIX because the relative command resolves from the workspace root · ${status.workspaceRootCwdLabel}`;
   }
 
   return `Always starts at the workspace root · ${status.workspaceRootCwdLabel}`;
@@ -468,7 +468,7 @@ function renderControlCenterHtml(status, options = {}) {
     : renderProfileEmptyState(status.profileStatusHint || 'Open a workspace folder to detect a saved profile');
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
@@ -476,21 +476,21 @@ function renderControlCenterHtml(status, options = {}) {
   <style>
     :root {
       --oc-bg: #050505;
-      --oc-panel: #110d0c;
-      --oc-panel-strong: #17110f;
-      --oc-panel-soft: #1d1512;
-      --oc-border: #645041;
-      --oc-border-soft: rgba(220, 195, 170, 0.14);
-      --oc-text: #f7efe5;
-      --oc-text-dim: #dcc3aa;
-      --oc-text-soft: #aa9078;
-      --oc-accent: #d77757;
-      --oc-accent-bright: #f09464;
-      --oc-accent-soft: rgba(240, 148, 100, 0.18);
-      --oc-positive: #e8b86b;
-      --oc-warning: #f3c969;
-      --oc-critical: #ff8a6c;
-      --oc-focus: #ffd3a1;
+      --oc-panel: #07140b;
+      --oc-panel-strong: #0b1f10;
+      --oc-panel-soft: #0e2a15;
+      --oc-border: #1d8f3a;
+      --oc-border-soft: rgba(0, 255, 65, 0.16);
+      --oc-text: #eaffef;
+      --oc-text-dim: #9ee6ad;
+      --oc-text-soft: #6fbf7f;
+      --oc-accent: #00cc33;
+      --oc-accent-bright: #00ff41;
+      --oc-accent-soft: rgba(0, 255, 65, 0.18);
+      --oc-positive: #00ff41;
+      --oc-warning: #b7ff00;
+      --oc-critical: #ff4d4d;
+      --oc-focus: #00ff41;
     }
     * {
       box-sizing: border-box;
@@ -507,9 +507,9 @@ function renderControlCenterHtml(status, options = {}) {
       font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
       color: var(--oc-text);
       background:
-        radial-gradient(circle at top right, rgba(240, 148, 100, 0.16), transparent 34%),
-        radial-gradient(circle at 20% 0%, rgba(215, 119, 87, 0.14), transparent 28%),
-        linear-gradient(180deg, #090706, #050505 58%, #090706);
+        radial-gradient(circle at top right, rgba(0, 255, 65, 0.16), transparent 34%),
+        radial-gradient(circle at 20% 0%, rgba(0, 204, 51, 0.14), transparent 28%),
+        linear-gradient(180deg, #020804, #050505 58%, #020804);
       line-height: 1.45;
     }
     button {
@@ -530,7 +530,7 @@ function renderControlCenterHtml(status, options = {}) {
       position: absolute;
       inset: 0 0 auto;
       height: 2px;
-      background: linear-gradient(90deg, #ffb464, #f09464, #d77757, #814334);
+      background: linear-gradient(90deg, #00ff41, #00cc33, #008f11, #003b08);
       opacity: 0.95;
     }
     .sunset-gradient {
@@ -547,7 +547,7 @@ function renderControlCenterHtml(status, options = {}) {
       padding: 18px;
       border-radius: 16px;
       background:
-        linear-gradient(135deg, rgba(240, 148, 100, 0.06), rgba(215, 119, 87, 0.02) 55%, transparent),
+        linear-gradient(135deg, rgba(0, 255, 65, 0.06), rgba(0, 204, 51, 0.02) 55%, transparent),
         var(--oc-panel);
       border: 1px solid var(--oc-border-soft);
     }
@@ -622,10 +622,10 @@ function renderControlCenterHtml(status, options = {}) {
       color: var(--oc-text);
     }
     .refresh-button {
-      border: 1px solid rgba(240, 148, 100, 0.28);
+      border: 1px solid rgba(0, 255, 65, 0.28);
       border-radius: 999px;
       padding: 8px 12px;
-      background: rgba(240, 148, 100, 0.08);
+      background: rgba(0, 255, 65, 0.08);
       color: var(--oc-text-dim);
       cursor: pointer;
       white-space: nowrap;
@@ -730,18 +730,18 @@ function renderControlCenterHtml(status, options = {}) {
       transition: border-color 140ms ease, transform 140ms ease, background 140ms ease, box-shadow 140ms ease;
     }
     .action-button.primary {
-      border-color: rgba(240, 148, 100, 0.44);
+      border-color: rgba(0, 255, 65, 0.44);
       background:
-        linear-gradient(135deg, rgba(255, 180, 100, 0.22), rgba(215, 119, 87, 0.12) 58%, rgba(129, 67, 52, 0.12)),
-        #241713;
+        linear-gradient(135deg, rgba(0, 255, 65, 0.22), rgba(0, 204, 51, 0.12) 58%, rgba(0, 59, 8, 0.12)),
+        #06140a;
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
     .action-button.secondary:hover:enabled,
     .action-button.primary:hover:enabled,
     .refresh-button:hover {
-      border-color: rgba(240, 148, 100, 0.48);
+      border-color: rgba(0, 255, 65, 0.48);
       transform: translateY(-1px);
-      background-color: rgba(240, 148, 100, 0.1);
+      background-color: rgba(0, 255, 65, 0.1);
     }
     .action-button:disabled {
       cursor: not-allowed;
@@ -800,13 +800,13 @@ function renderControlCenterHtml(status, options = {}) {
     .refresh-button:focus-visible {
       outline: 2px solid var(--oc-focus);
       outline-offset: 2px;
-      box-shadow: 0 0 0 4px rgba(255, 211, 161, 0.16);
+      box-shadow: 0 0 0 4px rgba(0, 255, 65, 0.16);
     }
     code {
       padding: 1px 6px;
       border-radius: 999px;
-      border: 1px solid rgba(240, 148, 100, 0.18);
-      background: rgba(240, 148, 100, 0.08);
+      border: 1px solid rgba(0, 255, 65, 0.18);
+      background: rgba(0, 255, 65, 0.08);
       color: var(--oc-accent-bright);
       font-family: var(--vscode-editor-font-family, Consolas, monospace);
       font-size: 11px;
@@ -841,29 +841,29 @@ function renderControlCenterHtml(status, options = {}) {
         <div class="hero-top">
           <div class="brand">
             <div class="eyebrow">${escapeHtml(viewModel.header.eyebrow)}</div>
-            <div class="wordmark" aria-label="OpenClaude wordmark">Open<span class="wordmark-accent">Claude</span></div>
+            <div class="wordmark" aria-label="Wordmark OPEN MATRIX">OPEN <span class="wordmark-accent">MATRIX</span></div>
             <div class="headline">
               <h1 class="headline-title" id="control-center-title">${escapeHtml(viewModel.header.title)}</h1>
               <p class="headline-subtitle">${escapeHtml(viewModel.header.subtitle)}</p>
             </div>
           </div>
-          <div class="status-rail" role="group" aria-label="Runtime, provider, and profile status">
+          <div class="status-rail" role="group" aria-label="Status de runtime, provedor e perfil">
             ${viewModel.headerBadges.map(renderHeaderBadge).join('')}
-            <button class="refresh-button" id="refresh" type="button">Refresh</button>
+            <button class="refresh-button" id="refresh" type="button">Atualizar</button>
           </div>
         </div>
-        <section class="summary-grid" aria-label="Current launch summary">
+        <section class="summary-grid" aria-label="Resumo da inicialização atual">
           ${viewModel.summaryCards.map(renderSummaryCard).join('')}
         </section>
       </header>
 
-      <section class="modules" aria-label="Control center details">
+      <section class="modules" aria-label="Detalhes do centro de controle">
         ${viewModel.detailSections.map(renderDetailSection).join('')}
       </section>
 
-      <section class="actions-layout" aria-label="Control center actions">
+      <section class="actions-layout" aria-label="Ações do centro de controle">
         <section class="action-panel" aria-labelledby="actions-title">
-          <h2 class="action-section-title" id="actions-title">Launch & Project</h2>
+          <h2 class="action-section-title" id="actions-title">Inicialização e Projeto</h2>
           ${renderActionButton(viewModel.actions.primary, 'primary')}
           <div class="action-stack">
             ${renderActionButton(viewModel.actions.launchRoot)}
@@ -872,27 +872,27 @@ function renderControlCenterHtml(status, options = {}) {
         </section>
 
         <section class="support-card" aria-labelledby="quick-links-title">
-          <h2 class="support-title" id="quick-links-title">Quick Links</h2>
-          <div class="support-copy">Settings and workspace status stay in view here. Reference links stay secondary.</div>
+          <h2 class="support-title" id="quick-links-title">Links Rápidos</h2>
+          <div class="support-copy">Configurações e status do espaço de trabalho ficam visíveis aqui. Links de referência ficam em segundo plano.</div>
           <div class="support-stack">
             <button class="support-link" id="setup" type="button">
               <span class="support-link-label">Open Setup Guide</span>
-              <span class="summary-detail">Jump to install and provider setup docs.</span>
+              <span class="summary-detail">Ir para docs de instalação e configuração do provedor.</span>
             </button>
             <button class="support-link" id="repo" type="button">
               <span class="support-link-label">Open Repository</span>
-              <span class="summary-detail">Browse the upstream OpenClaude project.</span>
+              <span class="summary-detail">Navegar pelo projeto OPEN MATRIX.</span>
             </button>
             <button class="support-link" id="commands" type="button">
-              <span class="support-link-label">Open Command Palette</span>
-              <span class="summary-detail">Access VS Code and OpenClaude commands quickly.</span>
+              <span class="support-link-label">Abrir Paleta de Comandos</span>
+              <span class="summary-detail">Acessar comandos do VS Code e do OPEN MATRIX rapidamente.</span>
             </button>
           </div>
         </section>
       </section>
 
       <p class="footer-note">
-        Quick trigger: use <code>${escapeHtml(platform === 'darwin' ? 'Cmd+Shift+P' : 'Ctrl+Shift+P')}</code> for the command palette, then refresh this panel after workspace or profile changes.
+        Atalho rápido: use <code>${escapeHtml(platform === 'darwin' ? 'Cmd+Shift+P' : 'Ctrl+Shift+P')}</code> para abrir a paleta de comandos, depois atualize este painel após mudanças no espaço de trabalho ou perfil.
       </p>
     </div>
   </main>
@@ -915,7 +915,7 @@ function renderControlCenterHtml(status, options = {}) {
 </html>`;
 }
 
-class OpenClaudeControlCenterProvider {
+class OpenMatrixControlCenterProvider {
   constructor() {
     this.webviewView = null;
   }
@@ -933,19 +933,19 @@ class OpenClaudeControlCenterProvider {
     webviewView.webview.onDidReceiveMessage(async message => {
       switch (message?.type) {
         case 'launch':
-          await launchOpenClaude();
+          await launchOpenMatrix();
           break;
         case 'launchRoot':
-          await launchOpenClaude({ requireWorkspace: true });
+          await launchOpenMatrix({ requireWorkspace: true });
           break;
         case 'openProfile':
           await openWorkspaceProfile();
           break;
         case 'repo':
-          await vscode.env.openExternal(vscode.Uri.parse(OPENCLAUDE_REPO_URL));
+          await vscode.env.openExternal(vscode.Uri.parse(OPEN_MATRIX_REPO_URL));
           break;
         case 'setup':
-          await vscode.env.openExternal(vscode.Uri.parse(OPENCLAUDE_SETUP_URL));
+          await vscode.env.openExternal(vscode.Uri.parse(OPEN_MATRIX_SETUP_URL));
           break;
         case 'commands':
           await vscode.commands.executeCommand('workbench.action.showCommands');
@@ -977,7 +977,7 @@ class OpenClaudeControlCenterProvider {
   getErrorHtml(error) {
     const nonce = crypto.randomBytes(16).toString('base64');
     const message =
-      error instanceof Error ? error.message : 'Unknown Control Center error';
+      error instanceof Error ? error.message : 'Erro desconhecido no Centro de Controle';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -1020,7 +1020,7 @@ class OpenClaudeControlCenterProvider {
 </head>
 <body>
   <div class="panel">
-    <div class="title">Control Center Error</div>
+    <div class="title">Erro no Centro de Controle</div>
     <div class="message">${escapeHtml(message)}</div>
     <button id="refresh">Refresh</button>
   </div>
@@ -1045,7 +1045,7 @@ class OpenClaudeControlCenterProvider {
  */
 function activate(context) {
   // ── Control Center (existing) ──
-  const provider = new OpenClaudeControlCenterProvider();
+  const provider = new OpenMatrixControlCenterProvider();
   const refreshProvider = () => {
     void provider.refresh();
   };
@@ -1058,8 +1058,8 @@ function activate(context) {
   }
 
   const chatController = new ChatController(sessionManager);
-  const chatViewProvider = new OpenClaudeChatViewProvider(chatController);
-  const chatPanelManager = new OpenClaudeChatPanelManager(chatController);
+  const chatViewProvider = new OpenMatrixChatViewProvider(chatController);
+  const chatPanelManager = new OpenMatrixChatPanelManager(chatController);
 
   // ── Diff content provider ──
   const diffProvider = new DiffContentProvider();
@@ -1073,76 +1073,76 @@ function activate(context) {
     vscode.StatusBarAlignment.Right,
     100,
   );
-  statusBarItem.text = '$(comment-discussion) OpenClaude';
-  statusBarItem.tooltip = 'Open OpenClaude Chat';
-  statusBarItem.command = 'openclaude.openChat';
+  statusBarItem.text = '$(comment-discussion) OPEN MATRIX';
+  statusBarItem.tooltip = 'Abrir Conversa OPEN MATRIX';
+  statusBarItem.command = 'openmatrix.openChat';
   statusBarItem.show();
 
   chatController.onDidChangeState((state) => {
     switch (state) {
       case 'streaming':
-        statusBarItem.text = '$(sync~spin) OpenClaude';
-        statusBarItem.tooltip = 'OpenClaude is generating...';
+        statusBarItem.text = '$(sync~spin) OPEN MATRIX';
+        statusBarItem.tooltip = 'OPEN MATRIX is generating...';
         break;
       case 'connected':
-        statusBarItem.text = '$(comment-discussion) OpenClaude';
-        statusBarItem.tooltip = 'OpenClaude connected';
+        statusBarItem.text = '$(comment-discussion) OPEN MATRIX';
+        statusBarItem.tooltip = 'OPEN MATRIX conectado';
         break;
       default:
-        statusBarItem.text = '$(comment-discussion) OpenClaude';
-        statusBarItem.tooltip = 'Open OpenClaude Chat';
+        statusBarItem.text = '$(comment-discussion) OPEN MATRIX';
+        statusBarItem.tooltip = 'Open OPEN MATRIX Chat';
         break;
     }
   });
 
   // ── Existing commands ──
-  const startCommand = vscode.commands.registerCommand('openclaude.start', async () => {
-    await launchOpenClaude();
+  const startCommand = vscode.commands.registerCommand('openmatrix.start', async () => {
+    await launchOpenMatrix();
   });
 
   const startInWorkspaceRootCommand = vscode.commands.registerCommand(
-    'openclaude.startInWorkspaceRoot',
+    'openmatrix.startInWorkspaceRoot',
     async () => {
-      await launchOpenClaude({ requireWorkspace: true });
+      await launchOpenMatrix({ requireWorkspace: true });
     },
   );
 
-  const openDocsCommand = vscode.commands.registerCommand('openclaude.openDocs', async () => {
-    await vscode.env.openExternal(vscode.Uri.parse(OPENCLAUDE_REPO_URL));
+  const openDocsCommand = vscode.commands.registerCommand('openmatrix.openDocs', async () => {
+    await vscode.env.openExternal(vscode.Uri.parse(OPEN_MATRIX_REPO_URL));
   });
 
   const openSetupDocsCommand = vscode.commands.registerCommand(
-    'openclaude.openSetupDocs',
+    'openmatrix.openSetupDocs',
     async () => {
-      await vscode.env.openExternal(vscode.Uri.parse(OPENCLAUDE_SETUP_URL));
+      await vscode.env.openExternal(vscode.Uri.parse(OPEN_MATRIX_SETUP_URL));
     },
   );
 
   const openWorkspaceProfileCommand = vscode.commands.registerCommand(
-    'openclaude.openWorkspaceProfile',
+    'openmatrix.openWorkspaceProfile',
     async () => {
       await openWorkspaceProfile();
     },
   );
 
-  const openUiCommand = vscode.commands.registerCommand('openclaude.openControlCenter', async () => {
-    await vscode.commands.executeCommand('workbench.view.extension.openclaude');
+  const openUiCommand = vscode.commands.registerCommand('openmatrix.openControlCenter', async () => {
+    await vscode.commands.executeCommand('workbench.view.extension.open-matrix');
   });
 
   // ── New chat commands ──
-  const newChatCommand = vscode.commands.registerCommand('openclaude.newChat', () => {
+  const newChatCommand = vscode.commands.registerCommand('openmatrix.newChat', () => {
     chatController.stopSession();
     chatController.broadcast({ type: 'session_cleared' });
   });
 
-  const openChatCommand = vscode.commands.registerCommand('openclaude.openChat', () => {
+  const openChatCommand = vscode.commands.registerCommand('openmatrix.openChat', () => {
     chatPanelManager.openPanel();
   });
 
-  const resumeSessionCommand = vscode.commands.registerCommand('openclaude.resumeSession', async () => {
+  const resumeSessionCommand = vscode.commands.registerCommand('openmatrix.resumeSession', async () => {
     const sessions = await sessionManager.listSessions();
     if (sessions.length === 0) {
-      await vscode.window.showInformationMessage('No sessions found to resume.');
+      await vscode.window.showInformationMessage('Nenhuma sessão encontrada para retomar.');
       return;
     }
     const items = sessions.slice(0, 30).map(s => ({
@@ -1152,7 +1152,7 @@ function activate(context) {
       sessionId: s.id,
     }));
     const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Select a session to resume',
+      placeHolder: 'Selecione uma sessão para retomar',
     });
     if (picked) {
       chatController.stopSession();
@@ -1161,18 +1161,18 @@ function activate(context) {
     }
   });
 
-  const abortChatCommand = vscode.commands.registerCommand('openclaude.abortChat', () => {
+  const abortChatCommand = vscode.commands.registerCommand('openmatrix.abortChat', () => {
     chatController.abort();
   });
 
   // ── Register providers ──
   const controlCenterProviderReg = vscode.window.registerWebviewViewProvider(
-    'openclaude.controlCenter',
+    'openmatrix.controlCenter',
     provider,
   );
 
   const chatViewProviderReg = vscode.window.registerWebviewViewProvider(
-    'openclaude.chat',
+    'openmatrix.chat',
     chatViewProvider,
     { webviewOptions: { retainContextWhenHidden: true } },
   );
@@ -1199,7 +1199,7 @@ function activate(context) {
     // watchers
     profileWatcher,
     vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('openclaude')) {
+      if (event.affectsConfiguration('open-matrix')) {
         refreshProvider();
       }
     }),
@@ -1226,10 +1226,10 @@ function deactivate() {}
 module.exports = {
   activate,
   deactivate,
-  OpenClaudeControlCenterProvider,
+  OpenMatrixControlCenterProvider,
   renderControlCenterHtml,
   resolveLaunchTargets,
   ChatController,
-  OpenClaudeChatViewProvider,
-  OpenClaudeChatPanelManager,
+  OpenMatrixChatViewProvider,
+  OpenMatrixChatPanelManager,
 };

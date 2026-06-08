@@ -33,25 +33,25 @@ function buildActionModel({ canLaunchInWorkspaceRoot, workspaceProfilePath } = {
   return {
     primary: {
       id: 'launch',
-      label: 'Launch OpenClaude',
-      detail: 'Use the resolved project-aware launch directory',
+      label: 'Iniciar OPEN MATRIX',
+      detail: 'Usa o diretório de inicialização inteligente do projeto',
       tone: 'accent',
       disabled: false,
     },
     launchRoot: {
       id: 'launchRoot',
-      label: 'Launch in Workspace Root',
+      label: 'Iniciar na Raiz do Espaço de Trabalho',
       detail: canLaunchInWorkspaceRoot
-        ? 'Launch directly from the resolved workspace root'
-        : 'Open a workspace folder to enable workspace-root launch',
+        ? 'Inicia diretamente da raiz do espaço de trabalho resolvida'
+        : 'Abra uma pasta de espaço de trabalho para habilitar a inicialização na raiz',
       tone: 'neutral',
       disabled: !canLaunchInWorkspaceRoot,
     },
     openProfile: workspaceProfilePath
       ? {
           id: 'openProfile',
-          label: 'Open Workspace Profile',
-          detail: `Inspect ${truncateMiddle(workspaceProfilePath, 40)}`,
+          label: 'Abrir Perfil do Espaço de Trabalho',
+          detail: `Inspecionar ${truncateMiddle(workspaceProfilePath, 40)}`,
           tone: 'neutral',
           disabled: false,
         }
@@ -64,7 +64,7 @@ function getRuntimeTone(installed) {
 }
 
 function getProfileTone(profileStatusLabel) {
-  return profileStatusLabel === 'Invalid' || profileStatusLabel === 'Unreadable'
+  return profileStatusLabel === 'Inválido' || profileStatusLabel === 'Ilegível'
     ? 'warning'
     : 'neutral';
 }
@@ -86,7 +86,7 @@ function getProviderDetail(providerState, providerSourceLabel) {
       return [detail, providerSourceLabel].filter(Boolean).join(' · ');
     case 'env':
       return /^from environment$/i.test(detail)
-        ? detail
+        ? 'do ambiente'
         : [detail, providerSourceLabel].filter(Boolean).join(' · ');
     case 'shim':
     case 'unknown':
@@ -97,94 +97,94 @@ function getProviderDetail(providerState, providerSourceLabel) {
 }
 
 function buildControlCenterViewModel(status = {}) {
-  const runtimeSummary = status.installed ? 'Installed' : 'Missing';
-  const runtimeDetail = status.executable || 'Unknown command';
+  const runtimeSummary = status.installed ? 'Instalado' : 'Ausente';
+  const runtimeDetail = status.executable || 'Comando desconhecido';
   const providerDetail = getProviderDetail(status.providerState, status.providerSourceLabel);
   const providerTone = getProviderTone(status.providerState);
-  const workspaceSummary = status.workspaceFolder ? getPathTail(status.workspaceFolder) : 'No workspace open';
+  const workspaceSummary = status.workspaceFolder ? getPathTail(status.workspaceFolder) : 'Nenhum espaço de trabalho aberto';
   const workspaceDetail = [status.workspaceFolder, status.workspaceSourceLabel]
     .filter(Boolean)
-    .join(' · ') || 'no workspace open';
+    .join(' · ') || 'nenhum espaço de trabalho aberto';
 
   return {
     header: {
-      eyebrow: 'OpenClaude Control Center',
-      title: 'Project-aware OpenClaude companion',
+      eyebrow: 'Centro de Controle do OPEN MATRIX',
+      title: 'Acompanhante do OPEN MATRIX ciente de projetos',
       subtitle:
-        'Useful local status, predictable launch behavior, and quick access to the workflows you actually use.',
+        'Status local útil, comportamento de inicialização previsível e acesso rápido aos fluxos de trabalho que você realmente usa.',
     },
     headerBadges: [
       {
         key: 'runtime',
-        label: 'Runtime',
+        label: 'Executável',
         value: runtimeSummary,
         tone: getRuntimeTone(status.installed),
       },
       {
         key: 'provider',
-        label: 'Provider',
-        value: status.providerState?.label || 'Unknown',
+        label: 'Provedor',
+        value: status.providerState?.label || 'Desconhecido',
         tone: providerTone,
       },
       {
         key: 'profileStatus',
-        label: 'Profile',
-        value: status.profileStatusLabel || 'Unknown',
+        label: 'Perfil',
+        value: status.profileStatusLabel || 'Desconhecido',
         tone: getProfileTone(status.profileStatusLabel),
       },
     ],
     summaryCards: [
       {
         key: 'workspace',
-        label: 'Workspace',
-        value: status.workspaceFolder || 'No workspace open',
-        detail: status.workspaceSourceLabel || 'no workspace open',
+        label: 'Espaço de Trabalho',
+        value: status.workspaceFolder || 'Nenhum espaço de trabalho aberto',
+        detail: status.workspaceSourceLabel || 'nenhum espaço de trabalho aberto',
       },
       {
         key: 'launchCwd',
-        label: 'Launch cwd',
-        value: status.launchCwdLabel || 'VS Code default terminal cwd',
+        label: 'Diretório de Inicialização',
+        value: status.launchCwdLabel || 'Cwd padrão do terminal do VS Code',
       },
       {
         key: 'launchCommand',
-        label: 'Launch command',
+        label: 'Comando de Inicialização',
         value: status.launchCommand || '',
-        detail: status.terminalName ? `Integrated terminal: ${status.terminalName}` : '',
+        detail: status.terminalName ? `Terminal integrado: ${status.terminalName}` : '',
       },
     ],
     detailSections: [
       {
-        title: 'Project',
+        title: 'Projeto',
         rows: [
           {
             key: 'workspace',
-            label: 'Workspace folder',
+            label: 'Pasta do espaço de trabalho',
             summary: workspaceSummary,
             detail: workspaceDetail,
           },
           {
             key: 'profileStatus',
-            label: 'Workspace profile',
-            summary: status.profileStatusLabel || 'Unknown',
+            label: 'Perfil do espaço de trabalho',
+            summary: status.profileStatusLabel || 'Desconhecido',
             detail: status.profileStatusHint || '',
             tone: getProfileTone(status.profileStatusLabel),
           },
         ],
       },
       {
-        title: 'Runtime',
+        title: 'Executável',
         rows: [
           {
             key: 'runtime',
-            label: 'OpenClaude executable',
+            label: 'Executável do OPEN MATRIX',
             summary: runtimeSummary,
             detail: runtimeDetail,
             tone: getRuntimeTone(status.installed),
           },
           {
             key: 'provider',
-            label: 'Detected provider',
-            summary: status.providerState?.label || 'Unknown',
+            label: 'Provedor detectado',
+            summary: status.providerState?.label || 'Desconhecido',
             detail: providerDetail,
             tone: providerTone,
           },

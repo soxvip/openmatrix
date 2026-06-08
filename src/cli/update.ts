@@ -31,9 +31,9 @@ import { getInitialSettings } from 'src/utils/settings/settings.js'
 export async function update() {
   // Block updates for third-party providers using upstream Anthropic builds.
   // The update mechanism downloads from the first-party distribution bucket,
-  // which would silently replace the OpenClaude build with the upstream
+  // which would silently replace the OPEN MATRIX build with the upstream
   // Claude Code binary. However, builds with a custom PACKAGE_URL (like
-  // OpenClaude's @gitlawb/openclaude) are safe to self-update.
+  // OPEN MATRIX's @gitlawb/openclaude) are safe to self-update.
   if (
     getAPIProvider() !== 'firstParty' &&
     MACRO.PACKAGE_URL === '@anthropic-ai/claude-code'
@@ -266,7 +266,7 @@ export async function update() {
 
       if (result.latestVersion === MACRO.DISPLAY_VERSION) {
         writeToStdout(
-          chalk.green(`OpenClaude is up to date (${MACRO.DISPLAY_VERSION})`) + '\n',
+          chalk.green(`OPEN MATRIX is up to date (${MACRO.DISPLAY_VERSION})`) + '\n',
         )
       } else {
         writeToStdout(
@@ -336,7 +336,7 @@ export async function update() {
   // Check if versions match exactly, including any build metadata (like SHA)
   if (latestVersion === MACRO.DISPLAY_VERSION) {
     writeToStdout(
-      chalk.green(`OpenClaude is up to date (${MACRO.DISPLAY_VERSION})`) + '\n',
+      chalk.green(`OPEN MATRIX is up to date (${MACRO.DISPLAY_VERSION})`) + '\n',
     )
     await gracefulShutdown(0)
   }

@@ -12,15 +12,13 @@ if exist "%INSTALL_DIR%" (
   echo Pasta do app deletada.
 )
 
-if exist "%BIN_DIR%\open-matrix.cmd" (
-  del "%BIN_DIR%\open-matrix.cmd"
-  echo Comando open-matrix removido.
-)
-
-if exist "%BIN_DIR%\openclaude.cmd" (
-  del "%BIN_DIR%\openclaude.cmd"
-  echo Comando openclaude removido.
-)
+if exist "%BIN_DIR%\open-matrix.cmd" del "%BIN_DIR%\open-matrix.cmd"
+if exist "%BIN_DIR%\open-matrix.bat" del "%BIN_DIR%\open-matrix.bat"
+if exist "%BIN_DIR%\openmatrix.bat" del "%BIN_DIR%\openmatrix.bat"
+if exist "%APPDATA%\npm\open-matrix.cmd" del "%APPDATA%\npm\open-matrix.cmd"
+if exist "%APPDATA%\npm\open-matrix.bat" del "%APPDATA%\npm\open-matrix.bat"
+if exist "%APPDATA%\npm\openmatrix.bat" del "%APPDATA%\npm\openmatrix.bat"
+echo Comandos removidos.
 
 echo.
 echo %APP_NAME% foi desinstalado.

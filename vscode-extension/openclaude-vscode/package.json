@@ -1,7 +1,7 @@
 {
-  "name": "openclaude-vscode",
-  "displayName": "OpenClaude",
-  "description": "Practical VS Code companion for OpenClaude with project-aware launch behavior and a real Control Center.",
+  "name": "open-matrix-vscode",
+  "displayName": "OPEN MATRIX",
+  "description": "Acompanhante prático do VS Code para o OPEN MATRIX com inicialização inteligente e painel de controle integrado.",
   "version": "0.2.0",
   "publisher": "devnull-bootloader",
   "engines": {
@@ -13,18 +13,18 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onCommand:openclaude.start",
-    "onCommand:openclaude.startInWorkspaceRoot",
-    "onCommand:openclaude.openDocs",
-    "onCommand:openclaude.openSetupDocs",
-    "onCommand:openclaude.openWorkspaceProfile",
-    "onCommand:openclaude.openControlCenter",
-    "onCommand:openclaude.newChat",
-    "onCommand:openclaude.openChat",
-    "onCommand:openclaude.resumeSession",
-    "onCommand:openclaude.abortChat",
-    "onView:openclaude.controlCenter",
-    "onView:openclaude.chat"
+    "onCommand:openmatrix.start",
+    "onCommand:openmatrix.startInWorkspaceRoot",
+    "onCommand:openmatrix.openDocs",
+    "onCommand:openmatrix.openSetupDocs",
+    "onCommand:openmatrix.openWorkspaceProfile",
+    "onCommand:openmatrix.openControlCenter",
+    "onCommand:openmatrix.newChat",
+    "onCommand:openmatrix.openChat",
+    "onCommand:openmatrix.resumeSession",
+    "onCommand:openmatrix.abortChat",
+    "onView:openmatrix.controlCenter",
+    "onView:openmatrix.chat"
   ],
   "main": "./src/extension.js",
   "files": [
@@ -39,123 +39,123 @@
   "contributes": {
     "commands": [
       {
-        "command": "openclaude.start",
-        "title": "OpenClaude: Launch in Terminal",
-        "category": "OpenClaude"
+        "command": "openmatrix.start",
+        "title": "OPEN MATRIX: Iniciar no Terminal",
+        "category": "OPEN MATRIX"
       },
       {
-        "command": "openclaude.startInWorkspaceRoot",
-        "title": "OpenClaude: Launch in Workspace Root",
-        "category": "OpenClaude"
+        "command": "openmatrix.startInWorkspaceRoot",
+        "title": "OPEN MATRIX: Iniciar na Raiz do Espaço de Trabalho",
+        "category": "OPEN MATRIX"
       },
       {
-        "command": "openclaude.openDocs",
-        "title": "OpenClaude: Open Repository",
-        "category": "OpenClaude"
+        "command": "openmatrix.openDocs",
+        "title": "OPEN MATRIX: Abrir Repositório",
+        "category": "OPEN MATRIX"
       },
       {
-        "command": "openclaude.openSetupDocs",
-        "title": "OpenClaude: Open Setup Guide",
-        "category": "OpenClaude"
+        "command": "openmatrix.openSetupDocs",
+        "title": "OPEN MATRIX: Abrir Guia de Configuração",
+        "category": "OPEN MATRIX"
       },
       {
-        "command": "openclaude.openWorkspaceProfile",
-        "title": "OpenClaude: Open Workspace Profile",
-        "category": "OpenClaude"
+        "command": "openmatrix.openWorkspaceProfile",
+        "title": "OPEN MATRIX: Abrir Perfil do Espaço de Trabalho",
+        "category": "OPEN MATRIX"
       },
       {
-        "command": "openclaude.openControlCenter",
-        "title": "OpenClaude: Open Control Center",
-        "category": "OpenClaude"
+        "command": "openmatrix.openControlCenter",
+        "title": "OPEN MATRIX: Abrir Centro de Controle",
+        "category": "OPEN MATRIX"
       },
       {
-        "command": "openclaude.newChat",
-        "title": "OpenClaude: New Chat",
-        "category": "OpenClaude"
+        "command": "openmatrix.newChat",
+        "title": "OPEN MATRIX: Nova Conversa",
+        "category": "OPEN MATRIX"
       },
       {
-        "command": "openclaude.openChat",
-        "title": "OpenClaude: Open Chat Panel",
-        "category": "OpenClaude"
+        "command": "openmatrix.openChat",
+        "title": "OPEN MATRIX: Abrir Painel de Conversa",
+        "category": "OPEN MATRIX"
       },
       {
-        "command": "openclaude.resumeSession",
-        "title": "OpenClaude: Resume Session",
-        "category": "OpenClaude"
+        "command": "openmatrix.resumeSession",
+        "title": "OPEN MATRIX: Retomar Sessão",
+        "category": "OPEN MATRIX"
       },
       {
-        "command": "openclaude.abortChat",
-        "title": "OpenClaude: Abort Generation",
-        "category": "OpenClaude"
+        "command": "openmatrix.abortChat",
+        "title": "OPEN MATRIX: Abortar Geração",
+        "category": "OPEN MATRIX"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "openclaude",
-          "title": "OpenClaude",
-          "icon": "media/openclaude.svg"
+          "id": "openmatrix",
+          "title": "OPEN MATRIX",
+          "icon": "media/openmatrix.svg"
         }
       ]
     },
     "views": {
-      "openclaude": [
+      "openmatrix": [
         {
-          "id": "openclaude.chat",
-          "name": "Chat",
+          "id": "openmatrix.chat",
+          "name": "Conversa",
           "type": "webview"
         },
         {
-          "id": "openclaude.controlCenter",
-          "name": "Control Center",
+          "id": "openmatrix.controlCenter",
+          "name": "Centro de Controle",
           "type": "webview"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "openclaude.openChat",
+        "command": "openmatrix.openChat",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l"
       }
     ],
     "configuration": {
-      "title": "OpenClaude",
+      "title": "OPEN MATRIX",
       "properties": {
-        "openclaude.launchCommand": {
+        "openmatrix.launchCommand": {
           "type": "string",
-          "default": "openclaude",
-          "description": "Command run in the integrated terminal when launching OpenClaude."
+          "default": "open-matrix",
+          "description": "Comando executado no terminal integrado ao iniciar o OPEN MATRIX."
         },
-        "openclaude.terminalName": {
+        "openmatrix.terminalName": {
           "type": "string",
-          "default": "OpenClaude",
-          "description": "Integrated terminal tab name for OpenClaude sessions."
+          "default": "OPEN MATRIX",
+          "description": "Nome da aba do terminal integrado para sessões do OPEN MATRIX."
         },
-        "openclaude.useOpenAIShim": {
+        "openmatrix.useOpenAIShim": {
           "type": "boolean",
           "default": false,
-          "description": "Optionally set CLAUDE_CODE_USE_OPENAI=1 in launched OpenClaude terminals."
+          "description": "Opcionalmente define CLAUDE_CODE_USE_OPENAI=1 nos terminais do OPEN MATRIX iniciados."
         },
-        "openclaude.permissionMode": {
+        "openmatrix.permissionMode": {
           "type": "string",
           "default": "acceptEdits",
           "enum": ["default", "acceptEdits", "bypassPermissions", "plan"],
           "enumDescriptions": [
-            "Prompt for permission on each tool use (requires manual approval)",
-            "Auto-approve file edits, prompt for other operations (recommended)",
-            "Auto-approve all operations without prompting",
-            "Read-only mode — no file modifications allowed"
+            "Solicitar permissão para cada uso de ferramenta (requer aprovação manual)",
+            "Aprovar automaticamente edições de arquivos, solicitar para outras operações (recomendado)",
+            "Aprovar automaticamente todas as operações sem solicitar",
+            "Modo somente leitura — nenhuma modificação de arquivo é permitida"
           ],
-          "description": "Permission mode for chat sessions. Controls which tool operations are auto-approved."
+          "description": "Modo de permissão para sessões de conversa. Controla quais operações de ferramentas são auto-aprovadas."
         }
       }
     },
     "themes": [
       {
-        "label": "OpenClaude Terminal Black",
+        "label": "OPEN MATRIX Terminal Black",
         "uiTheme": "vs-dark",
-        "path": "./themes/OpenClaude-Terminal-Black.json"
+        "path": "./themes/OPEN-MATRIX-Terminal-Black.json"
       }
     ]
   },
@@ -165,7 +165,7 @@
     "package": "npx @vscode/vsce package --no-dependencies"
   },
   "keywords": [
-    "openclaude",
+    "openmatrix",
     "terminal",
     "theme",
     "cli",
