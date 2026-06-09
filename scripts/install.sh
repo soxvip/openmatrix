@@ -50,7 +50,7 @@ install_vscode_extension() {
     return $?
   fi
 
-  remote_vsix_url='https://raw.githubusercontent.com/soxvip/openmatrix/main/vscode-extension/openclaude-vscode/open-matrix-vscode-0.2.13.vsix'
+  remote_vsix_url='https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix'
   temp_vsix="${TMPDIR:-/tmp}/open-matrix-vscode-latest.vsix"
   printf 'Baixando extensao VS Code OPEN MATRIX do GitHub...\n'
   if command -v curl >/dev/null 2>&1 && curl -fsSL "$remote_vsix_url" -o "$temp_vsix"; then
@@ -77,15 +77,7 @@ command -v npm >/dev/null 2>&1 || fail 'npm nao encontrado. Instale Node.js LTS 
 
 install_spec="${OPEN_MATRIX_PACKAGE_SPEC:-}"
 if [ -z "$install_spec" ]; then
-  script_dir=""
-  if [ -n "${BASH_SOURCE[0]:-}" ]; then
-    script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
-  fi
-  if [ -n "$script_dir" ] && [ -f "$script_dir/../package.json" ]; then
-    install_spec="$(CDPATH= cd -- "$script_dir/.." && pwd)"
-  else
-    install_spec='https://github.com/soxvip/openmatrix/archive/refs/heads/main.tar.gz'
-  fi
+  install_spec='https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-cli.tgz'
 fi
 
 printf 'Instalando/atualizando CLI OPEN MATRIX de: %s\n' "$install_spec"

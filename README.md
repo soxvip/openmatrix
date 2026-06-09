@@ -94,7 +94,7 @@ open-matrix
 ### Install
 
 ```bash
-npm install -g https://github.com/soxvip/openmatrix/archive/refs/heads/main.tar.gz
+npm install -g https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-cli.tgz
 ```
 
 If you're on Arch Linux, you can install OpenClaude from the community-maintained [AUR package](https://aur.archlinux.org/packages/openclaude):
@@ -109,7 +109,7 @@ If the install later reports `ripgrep not found`, install ripgrep system-wide an
 ```bash
 openclaude --version
 npm view @gitlawb/openclaude dist-tags
-npm install -g https://github.com/soxvip/openmatrix/archive/refs/heads/main.tar.gz
+npm install -g https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-cli.tgz
 ```
 
 ### Start
