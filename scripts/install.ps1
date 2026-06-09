@@ -37,7 +37,7 @@ function Get-InstallSpec() {
     }
   }
 
-  return 'https://github.com/prdigennaro/openmatrix/archive/refs/heads/main.tar.gz'
+  return 'https://github.com/soxvip/openmatrix/archive/refs/heads/main.tar.gz'
 }
 
 function Join-PathIfBase($Base, $Child) {
@@ -105,7 +105,7 @@ function Install-OpenMatrixVSCodeExtension($CodeCommandPath) {
     return $LASTEXITCODE
   }
 
-  $remoteVsixUrl = 'https://raw.githubusercontent.com/prdigennaro/openmatrix/main/vscode-extension/openclaude-vscode/open-matrix-vscode-0.2.13.vsix'
+  $remoteVsixUrl = 'https://raw.githubusercontent.com/soxvip/openmatrix/main/vscode-extension/openclaude-vscode/open-matrix-vscode-0.2.13.vsix'
   $tempVsix = Join-Path ([IO.Path]::GetTempPath()) 'open-matrix-vscode-latest.vsix'
   try {
     Write-Host 'Baixando extensao VS Code OPEN MATRIX do GitHub...'

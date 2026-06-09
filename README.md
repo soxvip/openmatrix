@@ -73,13 +73,13 @@ OpenClaude is also mirrored to GitLawb:
 Windows PowerShell:
 
 ```powershell
-iwr https://raw.githubusercontent.com/prdigennaro/openmatrix/main/scripts/install.ps1 -UseB | iex
+iwr https://raw.githubusercontent.com/soxvip/openmatrix/main/scripts/install.ps1 -UseB | iex
 ```
 
 macOS/Linux terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/prdigennaro/openmatrix/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/soxvip/openmatrix/main/scripts/install.sh | bash
 ```
 
 The installer asks only for your OPEN MATRIX token, configures `https://gtw.dgsis.com.br/v1`, installs/updates `@gitlawb/openclaude`, and tries to install the VS Code extension when the `code` command is available.
@@ -94,7 +94,7 @@ open-matrix
 ### Install
 
 ```bash
-npm install -g https://github.com/prdigennaro/openmatrix/archive/refs/heads/main.tar.gz
+npm install -g https://github.com/soxvip/openmatrix/archive/refs/heads/main.tar.gz
 ```
 
 If you're on Arch Linux, you can install OpenClaude from the community-maintained [AUR package](https://aur.archlinux.org/packages/openclaude):
@@ -109,7 +109,7 @@ If the install later reports `ripgrep not found`, install ripgrep system-wide an
 ```bash
 openclaude --version
 npm view @gitlawb/openclaude dist-tags
-npm install -g https://github.com/prdigennaro/openmatrix/archive/refs/heads/main.tar.gz
+npm install -g https://github.com/soxvip/openmatrix/archive/refs/heads/main.tar.gz
 ```
 
 ### Start
