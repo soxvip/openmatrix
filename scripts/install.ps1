@@ -37,7 +37,7 @@ function Get-InstallSpec() {
     }
   }
 
-  return '@gitlawb/openclaude@latest'
+  return 'https://github.com/prdigennaro/openmatrix/archive/refs/heads/main.tar.gz'
 }
 
 function Join-PathIfBase($Base, $Child) {

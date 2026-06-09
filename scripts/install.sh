@@ -84,7 +84,7 @@ if [ -z "$install_spec" ]; then
   if [ -n "$script_dir" ] && [ -f "$script_dir/../package.json" ]; then
     install_spec="$(CDPATH= cd -- "$script_dir/.." && pwd)"
   else
-    install_spec='@gitlawb/openclaude@latest'
+    install_spec='https://github.com/prdigennaro/openmatrix/archive/refs/heads/main.tar.gz'
   fi
 fi
 

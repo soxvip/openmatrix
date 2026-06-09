@@ -122,3 +122,5 @@ CODE_OF_CONDUCT* text
 *.db binary
 *.sqlite binary
 *.sqlite3 binary
+# Keep built release bundles byte-stable when installed from GitHub tarball.
+dist/*.mjs -text -diff
