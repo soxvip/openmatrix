@@ -1,8 +1,63 @@
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+try {
+  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {
+}
 
 function Fail($Message) {
   Write-Error $Message
   exit 1
+}
+
+function Download-WithRetry($Uri, $OutFile, $Label) {
+  $maxAttempts = 5
+  for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+      if (Test-Path -LiteralPath $OutFile) {
+        Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+      }
+      Write-Host "Baixando $Label (tentativa $attempt/$maxAttempts)..."
+      Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -TimeoutSec 180
+      if ((Test-Path -LiteralPath $OutFile) -and ((Get-Item -LiteralPath $OutFile).Length -gt 0)) {
+        return $OutFile
+      }
+      throw 'Arquivo baixado vazio.'
+    } catch {
+      $message = $_.Exception.Message
+      if ($attempt -eq $maxAttempts) {
+        throw "Falha ao baixar $Label de $Uri. $message"
+      }
+      Write-Warning "Falha ao baixar ${Label}: $message. Tentando novamente..."
+      Start-Sleep -Seconds ([Math]::Min(5 * $attempt, 20))
+    }
+  }
+}
+
+function Install-NpmGlobalWithRetry($Spec) {
+  $maxAttempts = 3
+  for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    Write-Host "Instalando pacote npm (tentativa $attempt/$maxAttempts)..."
+    & npm install -g $Spec --no-audit --no-fund
+    if ($LASTEXITCODE -eq 0) {
+      return
+    }
+    if ($attempt -lt $maxAttempts) {
+      Write-Warning 'npm install falhou. Tentando novamente...'
+      Start-Sleep -Seconds ([Math]::Min(5 * $attempt, 15))
+    }
+  }
+  throw 'npm install falhou apos varias tentativas.'
+}
+
+function Resolve-InstallPackage($InstallSpec) {
+  if ($InstallSpec -match '^https?://.*\.tgz(\?.*)?$') {
+    $tempPackage = Join-Path ([IO.Path]::GetTempPath()) ("open-matrix-cli-$([guid]::NewGuid().ToString('N')).tgz")
+    Download-WithRetry $InstallSpec $tempPackage 'CLI OPEN MATRIX'
+    return [pscustomobject]@{ Spec = $tempPackage; Temp = $tempPackage }
+  }
+
+  return [pscustomobject]@{ Spec = $InstallSpec; Temp = $null }
 }
 
 Write-Host 'OPEN MATRIX installer for Windows' -ForegroundColor Green
@@ -99,18 +154,15 @@ function Install-OpenMatrixVSCodeExtension($CodeCommandPath) {
   }
 
   $remoteVsixUrl = 'https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix'
-  $tempVsix = Join-Path ([IO.Path]::GetTempPath()) 'open-matrix-vscode-latest.vsix'
+  $tempVsix = Join-Path ([IO.Path]::GetTempPath()) "open-matrix-vscode-$([guid]::NewGuid().ToString('N')).vsix"
   try {
-    Write-Host 'Baixando extensao VS Code OPEN MATRIX do GitHub...'
-    Invoke-WebRequest -Uri $remoteVsixUrl -OutFile $tempVsix -UseBasicParsing
-    if (Test-Path -LiteralPath $tempVsix) {
-      & $CodeCommandPath --install-extension $tempVsix --force
-      if ($LASTEXITCODE -eq 0) {
-        return 0
-      }
+    Download-WithRetry $remoteVsixUrl $tempVsix 'extensao VS Code OPEN MATRIX'
+    & $CodeCommandPath --install-extension $tempVsix --force
+    if ($LASTEXITCODE -eq 0) {
+      return 0
     }
   } catch {
-    Write-Warning "Nao foi possivel baixar VSIX do GitHub: $($_.Exception.Message)"
+    Write-Warning "Nao foi possivel baixar/instalar VSIX do GitHub: $($_.Exception.Message)"
   } finally {
     if (Test-Path -LiteralPath $tempVsix) {
       Remove-Item -LiteralPath $tempVsix -Force -ErrorAction SilentlyContinue
@@ -124,15 +176,22 @@ function Install-OpenMatrixVSCodeExtension($CodeCommandPath) {
 
 $installSpec = Get-InstallSpec
 Write-Host "Instalando/atualizando CLI OPEN MATRIX de: $installSpec"
-npm install -g $installSpec
-if ($LASTEXITCODE -ne 0) {
-  Fail 'Falha ao instalar OPEN MATRIX pelo npm.'
+$resolvedPackage = $null
+try {
+  $resolvedPackage = Resolve-InstallPackage $installSpec
+  Install-NpmGlobalWithRetry $resolvedPackage.Spec
+} catch {
+  Fail "Falha ao instalar OPEN MATRIX pelo npm. Verifique internet, proxy/VPN/firewall e tente novamente. Detalhe: $($_.Exception.Message)"
+} finally {
+  if ($resolvedPackage -and $resolvedPackage.Temp -and (Test-Path -LiteralPath $resolvedPackage.Temp)) {
+    Remove-Item -LiteralPath $resolvedPackage.Temp -Force -ErrorAction SilentlyContinue
+  }
 }
 
 Add-NpmGlobalPrefixToPath
 $openMatrixCommand = Get-Command open-matrix -ErrorAction SilentlyContinue
 if (-not $openMatrixCommand) {
-  Fail 'Comando open-matrix nao encontrado apos instalacao. Verifique se a versao publicada contem o binario open-matrix ou rode localmente: npm install -g "C:\Users\Rychard sidonio\openmatrix"'
+  Fail 'Comando open-matrix nao encontrado apos instalacao. Verifique PATH do npm global e rode novamente.'
 }
 
 $token = $env:OPEN_MATRIX_API_KEY
@@ -150,15 +209,20 @@ if ($LASTEXITCODE -ne 0) {
   Fail 'Falha ao configurar provider OPEN MATRIX.'
 }
 
-$codeCommandPath = Get-VSCodeCommandPath
-if ($codeCommandPath) {
-  $extensionExitCode = Install-OpenMatrixVSCodeExtension $codeCommandPath
-  if ($extensionExitCode -ne 0) {
-    Write-Warning 'Nao foi possivel instalar a extensao automaticamente. Se ela ainda nao estiver publicada no Marketplace, instale o arquivo .vsix em vscode-extension/openclaude-vscode manualmente pelo VS Code.'
-  }
+if ($env:OPEN_MATRIX_SKIP_VSCODE -eq '1') {
+  Write-Host 'Instalacao da extensao VS Code pulada por OPEN_MATRIX_SKIP_VSCODE=1.'
 } else {
-  Write-Warning 'VS Code nao encontrado via comando code nem nos caminhos padrao. Para instalar a extensao, abra VS Code e instale o arquivo .vsix em vscode-extension/openclaude-vscode.'
+  $codeCommandPath = Get-VSCodeCommandPath
+  if ($codeCommandPath) {
+    $extensionExitCode = Install-OpenMatrixVSCodeExtension $codeCommandPath
+    if ($extensionExitCode -ne 0) {
+      Write-Warning 'Nao foi possivel instalar a extensao automaticamente. Instale manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix'
+    }
+  } else {
+    Write-Warning 'VS Code nao encontrado via comando code nem nos caminhos padrao. Instale manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix'
+  }
 }
 
 Write-Host 'OPEN MATRIX instalado e configurado.' -ForegroundColor Green
 Write-Host 'Use: open-matrix'
+
