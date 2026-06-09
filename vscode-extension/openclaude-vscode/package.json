@@ -2,7 +2,7 @@
   "name": "open-matrix-vscode",
   "displayName": "OPEN MATRIX",
   "description": "Acompanhante prático do VS Code para o OPEN MATRIX com inicialização inteligente e painel de controle integrado.",
-  "version": "0.2.0",
+  "version": "0.2.13",
   "publisher": "devnull-bootloader",
   "engines": {
     "vscode": "^1.95.0"
@@ -17,6 +17,7 @@
     "onCommand:openmatrix.startInWorkspaceRoot",
     "onCommand:openmatrix.openDocs",
     "onCommand:openmatrix.openSetupDocs",
+    "onCommand:openmatrix.configureToken",
     "onCommand:openmatrix.openWorkspaceProfile",
     "onCommand:openmatrix.openControlCenter",
     "onCommand:openmatrix.newChat",
@@ -31,10 +32,12 @@
     "README.md",
     "media/**",
     "src/extension.js",
+    "src/poppler.js",
     "src/presentation.js",
     "src/state.js",
     "src/chat/**",
-    "themes/**"
+    "themes/**",
+    "vendor/poppler/**"
   ],
   "contributes": {
     "commands": [
@@ -56,6 +59,11 @@
       {
         "command": "openmatrix.openSetupDocs",
         "title": "OPEN MATRIX: Abrir Guia de Configuração",
+        "category": "OPEN MATRIX"
+      },
+      {
+        "command": "openmatrix.configureToken",
+        "title": "OPEN MATRIX: Configurar Token",
         "category": "OPEN MATRIX"
       },
       {
@@ -139,8 +147,13 @@
         },
         "openmatrix.permissionMode": {
           "type": "string",
-          "default": "acceptEdits",
-          "enum": ["default", "acceptEdits", "bypassPermissions", "plan"],
+          "default": "bypassPermissions",
+          "enum": [
+            "default",
+            "acceptEdits",
+            "bypassPermissions",
+            "plan"
+          ],
           "enumDescriptions": [
             "Solicitar permissão para cada uso de ferramenta (requer aprovação manual)",
             "Aprovar automaticamente edições de arquivos, solicitar para outras operações (recomendado)",
@@ -148,6 +161,25 @@
             "Modo somente leitura — nenhuma modificação de arquivo é permitida"
           ],
           "description": "Modo de permissão para sessões de conversa. Controla quais operações de ferramentas são auto-aprovadas."
+        },
+        "openmatrix.extraArgs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Flags extras anexadas ao comando OPEN MATRIX em sessoes de chat da extensao. Exemplo: [\"--model\", \"cx/gpt-5.5\"]."
+        },
+        "openmatrix.maxInlineImageBytes": {
+          "type": "number",
+          "default": 5242880,
+          "minimum": 0,
+          "description": "Tamanho maximo, em bytes, para enviar imagens anexadas inline/base64 ao modelo. Imagens maiores ainda entram como @caminho."
+        },
+        "openmatrix.appendSystemPrompt": {
+          "type": "string",
+          "default": "Host note from VS Code extension: this session runs on Windows. Language policy: answer in the same natural language used by the user in the latest message. If the user writes Portuguese, all explanations, plans, progress summaries, and final responses must be in Portuguese. Keep code, identifiers, file names, commands, logs, tool names, API names, and exact errors unchanged when needed. When using shell commands, prefer Windows-compatible commands; call powershell.exe or cmd.exe explicitly when useful. Before retrying any failed Bash command, inspect cwd, path, stderr, and command availability. Do not repeat an identical failing Bash command three times. Use absolute paths for files outside the workspace.",
+          "description": "Instrucao extra anexada ao system prompt da CLI em sessoes de chat da extensao."
         }
       }
     },

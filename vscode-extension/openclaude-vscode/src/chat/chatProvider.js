@@ -1,14 +1,48 @@
 /**
- * chatProvider — WebviewViewProvider (sidebar) and WebviewPanel manager
+ * chatProvider â€” WebviewViewProvider (sidebar) and WebviewPanel manager
  * (editor tab) that wire ProcessManager events to the chat UI.
  */
 
 const vscode = require('vscode');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const { ProcessManager } = require('./processManager');
 const { buildPermissionControlResult } = require('./permissionResponse');
 const { toViewModel } = require('./messageParser');
 const { renderChatHtml } = require('./chatRenderer');
+const { attachmentFromPath, buildMessageContentWithAttachments } = require('./fileAttachments');
+const { withBundledPopplerEnv } = require('../poppler');
+
+function getPathKey(env) {
+  return Object.keys(env || {}).find(k => k.toUpperCase() === 'PATH') || 'PATH';
+}
+
+function addKnownCliDirsToEnv(env) {
+  const nextEnv = { ...(env || {}) };
+  const candidates = [];
+  if (process.env.APPDATA) candidates.push(path.join(process.env.APPDATA, 'npm'));
+  if (process.env.USERPROFILE) candidates.push(path.join(process.env.USERPROFILE, 'AppData', 'Roaming', 'npm'));
+  const existingPathKey = getPathKey(process.env);
+  const targetPathKey = getPathKey(nextEnv);
+  const existingPath = nextEnv[targetPathKey] || process.env[existingPathKey] || '';
+  const existingParts = new Set(String(existingPath).split(path.delimiter).map(p => p.toLowerCase()));
+  const prepend = candidates.filter(dir => dir && fs.existsSync(dir) && !existingParts.has(dir.toLowerCase()));
+  if (prepend.length > 0) {
+    nextEnv[targetPathKey] = [...prepend, existingPath].filter(Boolean).join(path.delimiter);
+  }
+  return nextEnv;
+}
+
+const DEFAULT_APPEND_SYSTEM_PROMPT = [
+  'Host note from VS Code extension: this session runs on Windows.',
+  'Language policy: answer in the same natural language used by the user in the latest message. If the user writes Portuguese, all explanations, plans, progress summaries, and final responses must be in Portuguese. Keep code, identifiers, file names, commands, logs, tool names, API names, and exact errors unchanged when needed.',
+  'When using shell commands, prefer Windows-compatible commands; call powershell.exe or cmd.exe explicitly when useful.',
+  'Before retrying any failed Bash command, inspect cwd, path, stderr, and command availability. Do not repeat an identical failing Bash command three times.',
+  'Use absolute paths for files outside the workspace.',
+].join(' ');
+
 const { isAssistantMessage, isPartialMessage, isStreamEvent,
         isContentBlockDelta, isContentBlockStart, isMessageStart,
         isResultMessage, isControlRequest, isToolProgressMessage,
@@ -25,16 +59,106 @@ async function openFileInEditor(filePath) {
   }
 }
 
+async function pickFilesForWebview(webview) {
+  try {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: true,
+      openLabel: 'Anexar arquivos',
+      title: 'Escolha arquivos para enviar ao OPEN MATRIX',
+    });
+    if (!uris || uris.length === 0) return;
+    const attachments = [];
+    const errors = [];
+    for (const uri of uris) {
+      try {
+        attachments.push(await attachmentFromPath(uri.fsPath));
+      } catch (err) {
+        errors.push(err && err.message ? err.message : String(err));
+      }
+    }
+    webview.postMessage({ type: 'attachments_picked', attachments });
+    if (errors.length > 0) {
+      webview.postMessage({ type: 'attachments_error', message: errors.join('\n') });
+    }
+  } catch (err) {
+    webview.postMessage({ type: 'attachments_error', message: err && err.message ? err.message : String(err) });
+  }
+}
+
+function extensionForMime(mimeType) {
+  const mime = String(mimeType || '').toLowerCase();
+  if (mime === 'image/png') return '.png';
+  if (mime === 'image/jpeg') return '.jpg';
+  if (mime === 'image/gif') return '.gif';
+  if (mime === 'image/webp') return '.webp';
+  if (mime === 'application/pdf') return '.pdf';
+  if (mime === 'text/plain') return '.txt';
+  return '.bin';
+}
+
+function sanitizePasteName(name, mimeType, index) {
+  const fallback = `clipboard-${Date.now()}-${index}${extensionForMime(mimeType)}`;
+  const base = path.basename(String(name || fallback)).replace(/[^a-zA-Z0-9._-]/g, '_');
+  return base || fallback;
+}
+
+async function savePastedFilesForWebview(webview, files) {
+  try {
+    const items = Array.isArray(files) ? files : [];
+    if (items.length === 0) return;
+    const dir = path.join(os.tmpdir(), 'openmatrix-vscode-clipboard');
+    await fs.promises.mkdir(dir, { recursive: true });
+    const attachments = [];
+    const errors = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i] || {};
+      try {
+        const rawData = String(item.dataBase64 || '').replace(/^data:[^;]+;base64,/, '');
+        if (!rawData) throw new Error('Clipboard item sem dados base64');
+        const bytes = Buffer.from(rawData, 'base64');
+        if (bytes.length === 0) throw new Error('Clipboard item vazio');
+        const maxBytes = 25 * 1024 * 1024;
+        if (bytes.length > maxBytes) throw new Error(`Imagem colada muito grande (${bytes.length} bytes)`);
+        const mimeType = String(item.mimeType || item.type || 'application/octet-stream');
+        const prefix = crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : crypto.randomBytes(4).toString('hex');
+        const fileName = `${prefix}-${sanitizePasteName(item.name, mimeType, i)}`;
+        const outPath = path.join(dir, fileName);
+        await fs.promises.writeFile(outPath, bytes);
+        attachments.push(await attachmentFromPath(outPath));
+      } catch (err) {
+        errors.push(err && err.message ? err.message : String(err));
+      }
+    }
+    if (attachments.length > 0) {
+      webview.postMessage({ type: 'attachments_picked', attachments });
+    }
+    if (errors.length > 0) {
+      webview.postMessage({ type: 'attachments_error', message: errors.join('\n') });
+    }
+  } catch (err) {
+    webview.postMessage({ type: 'attachments_error', message: err && err.message ? err.message : String(err) });
+  }
+}
+
 function getLaunchConfig() {
-  const cfg = vscode.workspace.getConfiguration('openclaude');
-  const command = cfg.get('launchCommand', 'openclaude');
+  const cfg = vscode.workspace.getConfiguration('openmatrix');
+  const command = cfg.get('launchCommand', 'open-matrix');
   const shimEnabled = cfg.get('useOpenAIShim', false);
-  const permissionMode = cfg.get('permissionMode', 'acceptEdits');
-  const env = {};
+  const permissionMode = cfg.get('permissionMode', 'bypassPermissions');
+  const rawExtraArgs = cfg.get('extraArgs', []);
+  const extraArgs = Array.isArray(rawExtraArgs)
+    ? rawExtraArgs.map(String).filter(Boolean)
+    : [];
+  const appendSystemPrompt = cfg.get('appendSystemPrompt', DEFAULT_APPEND_SYSTEM_PROMPT);
+  let env = {};
   if (shimEnabled) env.CLAUDE_CODE_USE_OPENAI = '1';
+  env = withBundledPopplerEnv(env);
+  env = addKnownCliDirsToEnv(env);
   const folders = vscode.workspace.workspaceFolders;
   const cwd = folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
-  return { command, cwd, env, permissionMode };
+  return { command, cwd, env, permissionMode, extraArgs, appendSystemPrompt };
 }
 
 class ChatController {
@@ -48,9 +172,14 @@ class ChatController {
     this._currentSessionId = null;
     this._streaming = false;
     this._lastResult = null;
+    this._permissionModeOverride = null;
+    this._runtimeTools = 'default';
     this._thinkingTokens = 0;
     this._thinkingStartTime = null;
     this._currentBlockType = null;
+    this._turnSawAssistantMessage = false;
+    this._turnHadStreamDelta = false;
+    this._lastAssistantText = '';
     /** @type {Map<string, { input: Record<string, unknown>, permissionSuggestions: unknown[], toolUseId: string | null }>} */
     this._pendingPermissions = new Map();
 
@@ -81,13 +210,18 @@ class ChatController {
     this.stopSession();
     this._accumulatedText = '';
     this._toolUses = [];
+    this._turnSawAssistantMessage = false;
+    this._turnHadStreamDelta = false;
+    this._lastAssistantText = '';
     // Only clear messages if this is a brand new session (not continuing)
     if (!opts.continueSession && !opts.sessionId) {
       this._messages = [];
     }
     this._currentSessionId = opts.sessionId || this._currentSessionId || null;
 
-    const { command, cwd, env, permissionMode } = getLaunchConfig();
+    const launchConfig = getLaunchConfig();
+    const { command, cwd, env, extraArgs, appendSystemPrompt } = launchConfig;
+    const permissionMode = opts.permissionMode || this._permissionModeOverride || launchConfig.permissionMode || 'bypassPermissions';
 
     this._process = new ProcessManager({
       command,
@@ -97,7 +231,8 @@ class ChatController {
       continueSession: opts.continueSession || false,
       model: opts.model,
       permissionMode,
-      extraArgs: opts.extraArgs || [],
+      extraArgs: opts.extraArgs || extraArgs || [],
+      appendSystemPrompt: opts.appendSystemPrompt ?? appendSystemPrompt,
     });
 
     this._readyResolve = null;
@@ -124,6 +259,9 @@ class ChatController {
       this._accumulatedText = '';
       this._toolUses = [];
       this._lastResult = null;
+      this._turnSawAssistantMessage = false;
+      this._turnHadStreamDelta = false;
+      this._lastAssistantText = '';
       this._broadcast({
         type: 'connected',
         message: code === 0 ? 'Ready' : `Process exited (code ${code})`,
@@ -133,6 +271,7 @@ class ChatController {
 
     try {
       this._process.start();
+      this._broadcast({ type: 'power_state', ...this.getPowerState(permissionMode) });
       this._broadcast({ type: 'connected', message: 'Connected' });
       this._onDidChangeState.fire('connected');
     } catch (err) {
@@ -148,8 +287,47 @@ class ChatController {
     this._pendingPermissions.clear();
   }
 
-  async sendMessage(text) {
-    // Keep the process alive for multi-turn — just send directly.
+  getPowerState(permissionMode = null) {
+    const mode = permissionMode || this._permissionModeOverride || getLaunchConfig().permissionMode || 'bypassPermissions';
+    const label = mode === 'bypassPermissions'
+      ? 'Poder total'
+      : mode === 'plan'
+        ? 'Modo plano'
+        : 'Modo seguro';
+    return {
+      label,
+      permissionMode: mode,
+      tools: this._runtimeTools,
+      detail: `${label} \u00b7 tools ${this._runtimeTools} \u00b7 ${mode}`,
+    };
+  }
+
+  async handleLocalSlashCommand(command) {
+    const normalized = String(command || '').trim().toLowerCase();
+    const nextModeByCommand = {
+      '/full': 'bypassPermissions',
+      '/safe': 'acceptEdits',
+      '/plan': 'plan',
+    };
+    const nextMode = nextModeByCommand[normalized];
+    if (!nextMode) return false;
+
+    const resumeSessionId = this._currentSessionId || (this._process && this._process.sessionId) || null;
+    this._permissionModeOverride = nextMode;
+    // Restart CLI process so new permission mode is applied, but preserve
+    // current session id. Next message resumes same CLI conversation with
+    // new permission mode instead of losing history/context.
+    this.stopSession();
+    if (resumeSessionId) this._currentSessionId = resumeSessionId;
+    const powerState = this.getPowerState(nextMode);
+    this._broadcast({ type: 'power_state', ...powerState });
+    this._broadcast({ type: 'status', content: `${powerState.detail} - contexto preservado; proxima mensagem retoma a mesma sessao` });
+    this._onDidChangeState.fire('idle');
+    return true;
+  }
+
+  async sendMessage(text, attachments = []) {
+    // Keep the process alive for multi-turn â€” just send directly.
     // The CLI maintains full session state (tools, history) across turns.
     // Only start a new process if none exists or it died.
     if (!this._process || !this._process.running) {
@@ -157,34 +335,55 @@ class ChatController {
         sessionId: this._currentSessionId || undefined,
       });
     }
-    await this._doSend(text);
+    await this._doSend(text, attachments);
   }
 
-  async _doSend(text) {
+  async _doSend(text, attachments = []) {
     if (!this._process) return;
-    // On first message after process start, wait for CLI to be ready.
-    // On subsequent messages, the process is already running and accepting input.
-    if (this._readyPromise) {
-      const grace = new Promise(resolve => setTimeout(resolve, 8000));
-      await Promise.race([this._readyPromise, grace]);
-      this._readyPromise = null;
-    }
+    // Send immediately. The CLI emits its initial system message only after
+    // receiving the first stream-json user message, so waiting for `system` here
+    // makes the chat look unresponsive.
+    this._readyPromise = null;
     this._accumulatedText = '';
     this._toolUses = [];
+    this._turnSawAssistantMessage = false;
+    this._turnHadStreamDelta = false;
+    this._lastAssistantText = '';
     try {
-      this._process.sendUserMessage(text);
-      this._messages.push({ role: 'user', text });
+      const cfg = vscode.workspace.getConfiguration('openmatrix');
+      const maxInlineImageBytes = cfg.get('maxInlineImageBytes', 5 * 1024 * 1024);
+      const prepared = await buildMessageContentWithAttachments(text, attachments, { maxInlineImageBytes });
+      for (const warning of prepared.warnings || []) {
+        this._broadcast({ type: 'attachments_error', message: warning });
+      }
+      this._process.sendUserMessage(prepared.content);
+      this._messages.push({ role: 'user', text: String(text || '').trim() || 'Analise os arquivos anexados.', attachments: prepared.attachments });
     } catch (err) {
       this._broadcast({ type: 'error', message: err.message });
     }
   }
 
   abort() {
-    if (this._process) {
-      this._process.abort();
-      this._broadcast({ type: 'stream_end', text: this._accumulatedText, usage: null });
-      this._onDidChangeState.fire('idle');
-    }
+    if (!this._process || !this._streaming) return;
+
+    this._process.abort();
+    this._streaming = false;
+    this._pendingPermissions.clear();
+    this._broadcast({
+      type: 'stream_end',
+      text: this._accumulatedText,
+      usage: null,
+      final: true,
+      aborted: true,
+    });
+    this._accumulatedText = '';
+    this._toolUses = [];
+    this._lastResult = null;
+    this._currentBlockType = null;
+    this._turnSawAssistantMessage = false;
+    this._turnHadStreamDelta = false;
+    this._lastAssistantText = '';
+    this._onDidChangeState.fire('idle');
   }
 
   sendPermissionResponse(requestId, action, toolUseId) {
@@ -210,17 +409,26 @@ class ChatController {
       this._currentSessionId = msg.session_id;
     }
 
-    // System message — extract model and session info
+    // System message â€” extract model and session info
     if (msg.type === 'system') {
       this._broadcast({
         type: 'system_info',
         model: msg.model || null,
         sessionId: msg.session_id || msg.sessionId || null,
+        tools: Array.isArray(msg.tools) ? msg.tools : [],
+        permissionMode: msg.permissionMode || this._permissionModeOverride || null,
+        slashCommands: Array.isArray(msg.slash_commands) ? msg.slash_commands : [],
+        agents: Array.isArray(msg.agents) ? msg.agents : [],
+        skills: Array.isArray(msg.skills) ? msg.skills : [],
+      });
+      this._broadcast({
+        type: 'power_state',
+        ...this.getPowerState(msg.permissionMode || this._permissionModeOverride),
       });
       return;
     }
 
-    // Control request (permission prompt) — check EARLY before other handlers
+    // Control request (permission prompt) â€” check EARLY before other handlers
     if (msg.type === 'control_request' || isControlRequest(msg)) {
       const req = msg.request || {};
       const { toolDisplayName, parseToolInput } = require('./messageParser');
@@ -241,7 +449,7 @@ class ChatController {
       this._broadcast({
         type: 'permission_request',
         requestId,
-        toolName: req.tool_name || 'Unknown',
+        toolName: req.tool_name || 'Desconhecida',
         displayName: req.display_name || req.title || toolDisplayName(req.tool_name),
         description: req.description || '',
         inputPreview: parseToolInput(req.input),
@@ -261,7 +469,7 @@ class ChatController {
       return;
     }
 
-    // Assistant message — always mid-turn; true completion comes from 'result'
+    // Assistant message â€” always mid-turn; true completion comes from 'result'
     if (isAssistantMessage(msg)) {
       const inner = msg.message || msg;
       const text = getTextContent(inner);
@@ -276,10 +484,12 @@ class ChatController {
         input: tu.input,
         status: 'running',
       }));
+      this._turnSawAssistantMessage = true;
+      this._lastAssistantText = text || '';
       this._messages.push({ role: 'assistant', text, toolUses: toolUseVms });
       const usage = inner.usage || msg.usage || null;
 
-      // Finalize current text bubble but stay streaming — true completion
+      // Finalize current text bubble but stay streaming â€” true completion
       // is signaled by the 'result' message, not by the assistant message.
       this._broadcast({ type: 'stream_end', text, usage, final: false });
       this._accumulatedText = '';
@@ -293,12 +503,12 @@ class ChatController {
             name: tu.name,
           });
         }
-        this._broadcast({ type: 'status', content: 'Using tools...' });
+        this._broadcast({ type: 'status', content: 'Usando ferramentas...' });
       }
       return;
     }
 
-    // User message with tool_use_result — this is the tool output
+    // User message with tool_use_result â€” this is the tool output
     if (msg.type === 'user' && msg.message) {
       const content = msg.message.content;
       if (Array.isArray(content)) {
@@ -312,22 +522,31 @@ class ChatController {
             this._broadcast({
               type: 'tool_result',
               toolUseId: block.tool_use_id,
-              content: resultText.slice(0, 2000) || '(done)',
+              content: resultText.slice(0, 2000) || '(concluido)',
               isError: block.is_error || false,
             });
           }
         }
       }
-      this._broadcast({ type: 'status', content: 'Thinking...' });
+      this._broadcast({ type: 'status', content: 'Pensando...' });
       return;
     }
 
-    // Session result — turn is complete. Go idle. The process stays alive
+    // Session result â€” turn is complete. Go idle. The process stays alive
     // in stream-json mode for multi-turn conversation.
     if (msg.type === 'result' && msg.subtype) {
       this._lastResult = msg;
-      // Only use result text if nothing was shown via streaming yet
-      const text = this._accumulatedText || '';
+      // Only use result text if nothing was shown via streaming yet. Some
+      // failures arrive only in the final result object.
+      const resultText = typeof msg.result === 'string'
+        ? msg.result
+        : typeof msg.error === 'string'
+          ? msg.error
+          : typeof msg.message === 'string'
+            ? msg.message
+            : '';
+      const alreadyDisplayed = this._turnSawAssistantMessage || this._turnHadStreamDelta;
+      const text = this._accumulatedText || (alreadyDisplayed ? '' : resultText) || '';
       this._broadcast({ type: 'stream_end', text, usage: msg.usage || null, final: true });
       // Show turn info: if the model stopped without using tools (num_turns=1),
       // the user knows the model chose not to edit
@@ -336,13 +555,16 @@ class ChatController {
         this._broadcast({
           type: 'status',
           content: msg.num_turns > 1
-            ? 'Completed (' + msg.num_turns + ' turns)'
-            : 'Ready',
+            ? 'Concluido (' + msg.num_turns + ' turnos)'
+            : 'Pronto',
         });
       }
       this._accumulatedText = '';
       this._toolUses = [];
       this._streaming = false;
+      this._turnSawAssistantMessage = false;
+      this._turnHadStreamDelta = false;
+      this._lastAssistantText = '';
       this._onDidChangeState.fire('idle');
       return;
     }
@@ -384,6 +606,9 @@ class ChatController {
         this._accumulatedText = '';
         this._thinkingTokens = 0;
         this._currentBlockType = null;
+        this._turnSawAssistantMessage = false;
+        this._turnHadStreamDelta = false;
+        this._lastAssistantText = '';
         if (!this._streaming) {
           this._streaming = true;
           this._toolUses = [];
@@ -422,6 +647,7 @@ class ChatController {
       case 'content_block_delta':
         if (event.delta) {
           if (event.delta.type === 'text_delta' && event.delta.text) {
+            this._turnHadStreamDelta = true;
             this._accumulatedText += event.delta.text;
             this._broadcast({ type: 'stream_delta', text: this._accumulatedText });
           } else if (event.delta.type === 'thinking_delta') {
@@ -495,7 +721,16 @@ class OpenMatrixChatViewProvider {
     webview.onDidReceiveMessage(async (msg) => {
       switch (msg.type) {
         case 'send_message':
-          this._chatController.sendMessage(msg.text);
+          this._chatController.sendMessage(msg.text, msg.attachments);
+          break;
+        case 'pick_files':
+          await pickFilesForWebview(webview);
+          break;
+        case 'paste_files':
+          await savePastedFilesForWebview(webview, msg.files);
+          break;
+        case 'local_slash_command':
+          await this._chatController.handleLocalSlashCommand(msg.command);
           break;
         case 'abort':
           this._chatController.abort();
@@ -604,7 +839,16 @@ class OpenMatrixChatPanelManager {
     webview.onDidReceiveMessage(async (msg) => {
       switch (msg.type) {
         case 'send_message':
-          this._chatController.sendMessage(msg.text);
+          this._chatController.sendMessage(msg.text, msg.attachments);
+          break;
+        case 'pick_files':
+          await pickFilesForWebview(webview);
+          break;
+        case 'paste_files':
+          await savePastedFilesForWebview(webview, msg.files);
+          break;
+        case 'local_slash_command':
+          await this._chatController.handleLocalSlashCommand(msg.command);
           break;
         case 'abort':
           this._chatController.abort();

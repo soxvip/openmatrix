@@ -15,9 +15,10 @@ const { buildControlCenterViewModel } = require('./presentation');
 const { ChatController, OpenMatrixChatViewProvider, OpenMatrixChatPanelManager } = require('./chat/chatProvider');
 const { SessionManager } = require('./chat/sessionManager');
 const { DiffContentProvider, SCHEME: DIFF_SCHEME } = require('./chat/diffController');
+const { withBundledPopplerEnv } = require('./poppler');
 
-const OPEN_MATRIX_REPO_URL = 'https://github.com/Gitlawb/open-matrix';
-const OPEN_MATRIX_SETUP_URL = 'https://github.com/Gitlawb/open-matrix/blob/main/README.md#quick-start';
+const OPEN_MATRIX_REPO_URL = 'https://github.com/prdigennaro/openmatrix';
+const OPEN_MATRIX_SETUP_URL = 'https://github.com/prdigennaro/openmatrix/blob/main/README.md#quick-start';
 const PROFILE_FILE_NAME = '.open-matrix-profile.json';
 
 function escapeHtml(value) {
@@ -91,7 +92,7 @@ function resolveLaunchTargets({ activeFilePath, workspacePath, workspaceSourceLa
     return {
       projectAwareCwd: workspacePath,
       projectAwareCwdLabel: workspacePath,
-      projectAwareSourceLabel: 'workspace root (required by relative launch command)',
+      projectAwareSourceLabel: 'raiz do espaco de trabalho (exigida por comando relativo)',
       workspaceRootCwd: workspacePath,
       workspaceRootCwdLabel: workspacePath,
       launchActionsShareTarget: true,
@@ -105,7 +106,7 @@ function resolveLaunchTargets({ activeFilePath, workspacePath, workspaceSourceLa
       projectAwareCwdLabel: activeFileDirectory,
       projectAwareSourceLabel: 'diretório do arquivo ativo',
       workspaceRootCwd: workspacePath || null,
-      workspaceRootCwdLabel: workspacePath || 'No workspace open',
+      workspaceRootCwdLabel: workspacePath || 'Nenhum espaco de trabalho aberto',
       launchActionsShareTarget: false,
       launchActionsShareTargetReason: null,
     };
@@ -115,7 +116,7 @@ function resolveLaunchTargets({ activeFilePath, workspacePath, workspaceSourceLa
     return {
       projectAwareCwd: workspacePath,
       projectAwareCwdLabel: workspacePath,
-      projectAwareSourceLabel: workspaceSourceLabel || 'workspace root',
+      projectAwareSourceLabel: workspaceSourceLabel || 'raiz do espaco de trabalho',
       workspaceRootCwd: workspacePath,
       workspaceRootCwdLabel: workspacePath,
       launchActionsShareTarget: true,
@@ -125,10 +126,10 @@ function resolveLaunchTargets({ activeFilePath, workspacePath, workspaceSourceLa
 
   return {
     projectAwareCwd: null,
-    projectAwareCwdLabel: 'VS Code default terminal cwd',
-    projectAwareSourceLabel: 'VS Code default terminal cwd',
+    projectAwareCwdLabel: 'cwd padrao do terminal do VS Code',
+    projectAwareSourceLabel: 'cwd padrao do terminal do VS Code',
     workspaceRootCwd: null,
-    workspaceRootCwdLabel: 'No workspace open',
+    workspaceRootCwdLabel: 'Nenhum espaco de trabalho aberto',
     launchActionsShareTarget: false,
     launchActionsShareTargetReason: null,
   };
@@ -144,9 +145,9 @@ function resolveLaunchWorkspace() {
 function getWorkspaceSourceLabel(source) {
   switch (source) {
     case 'active-workspace':
-      return 'active editor workspace';
+      return 'espaco de trabalho do editor ativo';
     case 'first-workspace':
-      return 'first workspace folder';
+      return 'primeira pasta do espaco de trabalho';
     default:
       return 'nenhum espaço de trabalho aberto';
   }
@@ -204,10 +205,15 @@ function readWorkspaceProfile(profilePath) {
 }
 
 async function collectControlCenterState() {
-  const configured = vscode.workspace.getConfiguration('open-matrix');
+  const configured = vscode.workspace.getConfiguration('openmatrix');
   const launchCommand = configured.get('launchCommand', 'open-matrix');
   const terminalName = configured.get('terminalName', 'OPEN MATRIX');
   const shimEnabled = configured.get('useOpenAIShim', false);
+  const permissionMode = configured.get('permissionMode', 'bypassPermissions');
+  const rawExtraArgs = configured.get('extraArgs', []);
+  const extraArgs = Array.isArray(rawExtraArgs)
+    ? rawExtraArgs.map(String).filter(Boolean)
+    : [];
   const executable = getExecutableFromCommand(launchCommand);
   const launchWorkspace = resolveLaunchWorkspace();
   const workspaceFolder = launchWorkspace.workspacePath;
@@ -227,8 +233,8 @@ async function collectControlCenterState() {
     ? readWorkspaceProfile(profilePath)
     : {
         profile: null,
-        statusLabel: 'No workspace',
-        statusHint: 'Open a workspace folder to detect a saved profile',
+        statusLabel: 'Sem espaco de trabalho',
+        statusHint: 'Abra uma pasta de trabalho para detectar perfil salvo',
         filePath: null,
       };
 
@@ -259,12 +265,15 @@ async function collectControlCenterState() {
     workspaceProfilePath: profileState.filePath,
     providerState,
     providerSourceLabel: getProviderSourceLabel(providerState.source),
+    permissionMode,
+    toolsMode: 'default',
+    extraArgs,
   };
 }
 
 async function launchOpenMatrix(options = {}) {
   const { requireWorkspace = false } = options;
-  const configured = vscode.workspace.getConfiguration('open-matrix');
+  const configured = vscode.workspace.getConfiguration('openmatrix');
   const launchCommand = configured.get('launchCommand', 'open-matrix');
   const terminalName = configured.get('terminalName', 'OPEN MATRIX');
   const shimEnabled = configured.get('useOpenAIShim', false);
@@ -273,7 +282,7 @@ async function launchOpenMatrix(options = {}) {
 
   if (requireWorkspace && !launchWorkspace.workspacePath) {
     await vscode.window.showWarningMessage(
-      'Open a workspace folder before using Launch in Workspace Root.',
+      'Abra uma pasta de trabalho antes de usar Iniciar na raiz do espaco de trabalho.',
     );
     return;
   }
@@ -290,25 +299,28 @@ async function launchOpenMatrix(options = {}) {
   const installed = await isCommandAvailable(executable, targetCwd);
 
   if (!installed) {
+    const setupAction = 'Abrir setup';
+    const repoAction = 'Abrir repositorio';
     const action = await vscode.window.showErrorMessage(
-      `OPEN MATRIX command not found: ${executable}. Install it with: npm install -g @gitlawb/open-matrix@latest`,
-      'Abrir Guia de Configuração',
-      'Abrir Repositório',
+      `Comando OPEN MATRIX nao encontrado: ${executable}. Instale a partir deste projeto com: npm install -g .`,
+      setupAction,
+      repoAction,
     );
 
-    if (action === 'Open Setup Guide') {
+    if (action === setupAction) {
       await vscode.env.openExternal(vscode.Uri.parse(OPEN_MATRIX_SETUP_URL));
-    } else if (action === 'Open Repository') {
+    } else if (action === repoAction) {
       await vscode.env.openExternal(vscode.Uri.parse(OPEN_MATRIX_REPO_URL));
     }
 
     return;
   }
 
-  const env = {};
+  let env = {};
   if (shimEnabled) {
     env.CLAUDE_CODE_USE_OPENAI = '1';
   }
+  env = withBundledPopplerEnv(env);
 
   const terminalOptions = {
     name: terminalName,
@@ -322,6 +334,16 @@ async function launchOpenMatrix(options = {}) {
   const terminal = vscode.window.createTerminal(terminalOptions);
   terminal.show(true);
   terminal.sendText(launchCommand, true);
+}
+
+async function configureOpenMatrixToken() {
+  const configured = vscode.workspace.getConfiguration('openmatrix');
+  const launchCommand = configured.get('launchCommand', 'open-matrix');
+  const terminal = vscode.window.createTerminal({
+    name: 'OPEN MATRIX Setup',
+  });
+  terminal.show(true);
+  terminal.sendText(`${launchCommand} setup`, true);
 }
 
 async function openWorkspaceProfile() {
@@ -396,25 +418,25 @@ function renderActionButton(action, variant = 'secondary') {
 
 function renderProfileEmptyState(detail) {
   return `<div class="action-empty" role="status" aria-live="polite">
-    <div class="action-empty-title">No workspace profile yet</div>
+    <div class="action-empty-title">Nenhum perfil de espaco de trabalho ainda</div>
     <div class="action-empty-detail">${escapeHtml(detail)}</div>
   </div>`;
 }
 
 function getPrimaryLaunchActionDetail(status) {
   if (status.launchActionsShareTargetReason === 'relative-launch-command' && status.launchCwd) {
-    return `Project-aware launch is anchored to the workspace root by the relative command · ${status.launchCwdLabel}`;
+    return `Inicializacao ciente do projeto presa na raiz do espaco de trabalho pelo comando relativo - ${status.launchCwdLabel}`;
   }
 
-  if (status.launchCwd && status.launchCwdSourceLabel === 'active file directory') {
-    return `Starts beside the active file · ${status.launchCwdLabel}`;
+  if (status.launchCwd && (status.launchCwdSourceLabel === 'diret?rio do arquivo ativo' || status.launchCwdSourceLabel === 'diretorio do arquivo ativo')) {
+    return `Inicia junto do arquivo ativo - ${status.launchCwdLabel}`;
   }
 
   if (status.launchCwd) {
-    return `Project-aware launch. Currently resolves to ${status.launchCwdSourceLabel} · ${status.launchCwdLabel}`;
+    return `Inicializacao ciente do projeto. Agora resolve para ${status.launchCwdSourceLabel} - ${status.launchCwdLabel}`;
   }
 
-  return 'Project-aware launch. Uses the VS Code default terminal cwd';
+  return 'Inicializacao ciente do projeto. Usa o cwd padrao do terminal do VS Code';
 }
 
 function getWorkspaceRootActionDetail(status, fallbackDetail) {
@@ -423,10 +445,10 @@ function getWorkspaceRootActionDetail(status, fallbackDetail) {
   }
 
   if (status.launchActionsShareTargetReason === 'relative-launch-command') {
-    return `Same workspace-root target as Launch OPEN MATRIX because the relative command resolves from the workspace root · ${status.workspaceRootCwdLabel}`;
+    return `Mesmo alvo de raiz do espaco de trabalho que Iniciar OPEN MATRIX, porque o comando relativo resolve pela raiz do espaco de trabalho - ${status.workspaceRootCwdLabel}`;
   }
 
-  return `Always starts at the workspace root · ${status.workspaceRootCwdLabel}`;
+  return `Sempre inicia na raiz do espaco de trabalho - ${status.workspaceRootCwdLabel}`;
 }
 
 function getRenderableViewModel(status) {
@@ -465,7 +487,7 @@ function renderControlCenterHtml(status, options = {}) {
   const viewModel = getRenderableViewModel(status);
   const profileActionOrEmpty = viewModel.actions.openProfile
     ? renderActionButton(viewModel.actions.openProfile)
-    : renderProfileEmptyState(status.profileStatusHint || 'Open a workspace folder to detect a saved profile');
+    : renderProfileEmptyState(status.profileStatusHint || 'Abra uma pasta de trabalho para detectar perfil salvo');
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -876,11 +898,15 @@ function renderControlCenterHtml(status, options = {}) {
           <div class="support-copy">Configurações e status do espaço de trabalho ficam visíveis aqui. Links de referência ficam em segundo plano.</div>
           <div class="support-stack">
             <button class="support-link" id="setup" type="button">
-              <span class="support-link-label">Open Setup Guide</span>
+              <span class="support-link-label">Abrir guia de configuracao</span>
               <span class="summary-detail">Ir para docs de instalação e configuração do provedor.</span>
             </button>
+            <button class="support-link" id="configureToken" type="button">
+              <span class="support-link-label">Configurar token</span>
+              <span class="summary-detail">Abrir terminal integrado e rodar open-matrix setup.</span>
+            </button>
             <button class="support-link" id="repo" type="button">
-              <span class="support-link-label">Open Repository</span>
+              <span class="support-link-label">Abrir repositorio</span>
               <span class="summary-detail">Navegar pelo projeto OPEN MATRIX.</span>
             </button>
             <button class="support-link" id="commands" type="button">
@@ -899,17 +925,19 @@ function renderControlCenterHtml(status, options = {}) {
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    document.getElementById('launch').addEventListener('click', () => vscode.postMessage({ type: 'launch' }));
-    document.getElementById('launchRoot').addEventListener('click', () => vscode.postMessage({ type: 'launchRoot' }));
-    document.getElementById('repo').addEventListener('click', () => vscode.postMessage({ type: 'repo' }));
-    document.getElementById('setup').addEventListener('click', () => vscode.postMessage({ type: 'setup' }));
-    document.getElementById('commands').addEventListener('click', () => vscode.postMessage({ type: 'commands' }));
-    document.getElementById('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
-
-    const profileButton = document.getElementById('openProfile');
-    if (profileButton) {
-      profileButton.addEventListener('click', () => vscode.postMessage({ type: 'openProfile' }));
+    function bind(id, type) {
+      const element = document.getElementById(id);
+      if (element) element.addEventListener('click', () => vscode.postMessage({ type }));
     }
+
+    bind('launch', 'launch');
+    bind('launchRoot', 'launchRoot');
+    bind('repo', 'repo');
+    bind('setup', 'setup');
+    bind('configureToken', 'configureToken');
+    bind('commands', 'commands');
+    bind('refresh', 'refresh');
+    bind('openProfile', 'openProfile');
   </script>
 </body>
 </html>`;
@@ -946,6 +974,9 @@ class OpenMatrixControlCenterProvider {
           break;
         case 'setup':
           await vscode.env.openExternal(vscode.Uri.parse(OPEN_MATRIX_SETUP_URL));
+          break;
+        case 'configureToken':
+          await configureOpenMatrixToken();
           break;
         case 'commands':
           await vscode.commands.executeCommand('workbench.action.showCommands');
@@ -1118,6 +1149,13 @@ function activate(context) {
     },
   );
 
+  const configureTokenCommand = vscode.commands.registerCommand(
+    'openmatrix.configureToken',
+    async () => {
+      await configureOpenMatrixToken();
+    },
+  );
+
   const openWorkspaceProfileCommand = vscode.commands.registerCommand(
     'openmatrix.openWorkspaceProfile',
     async () => {
@@ -1126,7 +1164,7 @@ function activate(context) {
   );
 
   const openUiCommand = vscode.commands.registerCommand('openmatrix.openControlCenter', async () => {
-    await vscode.commands.executeCommand('workbench.view.extension.open-matrix');
+    await vscode.commands.executeCommand('workbench.view.extension.openmatrix');
   });
 
   // ── New chat commands ──
@@ -1185,6 +1223,7 @@ function activate(context) {
     startInWorkspaceRootCommand,
     openDocsCommand,
     openSetupDocsCommand,
+    configureTokenCommand,
     openWorkspaceProfileCommand,
     openUiCommand,
     controlCenterProviderReg,
@@ -1199,7 +1238,7 @@ function activate(context) {
     // watchers
     profileWatcher,
     vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('open-matrix')) {
+      if (event.affectsConfiguration('openmatrix')) {
         refreshProvider();
       }
     }),

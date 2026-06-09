@@ -7,7 +7,8 @@ const SAVED_PROFILES = new Set([
   'codex',
   'gemini',
   'atomic-chat',
-  'mistral'
+  'mistral',
+  'dgsis'
 ]);
 
 const CODEX_ALIAS_MODELS = new Set([
@@ -273,6 +274,10 @@ function getOpenAICompatibleLabel(baseUrl, model) {
     return 'DeepSeek';
   }
 
+  if (normalizedBaseUrl.includes('gtw.dgsis.com.br')) {
+    return 'OPEN MATRIX';
+  }
+
   if (normalizedBaseUrl.includes('openrouter')) {
     return 'OpenRouter';
   }
@@ -348,6 +353,8 @@ function describeSavedProfile(profile) {
       return buildProviderState('Codex', getDetail(profile.env, 'saved profile'), 'profile');
     case 'atomic-chat':
       return buildProviderState('Atomic Chat', getDetail(profile.env, 'saved profile'), 'profile');
+    case 'dgsis':
+      return buildProviderState('OPEN MATRIX', getDetail(profile.env, 'saved profile'), 'profile');
     case 'openai':
     default:
       return describeOpenAICompatible(profile.env, 'profile');

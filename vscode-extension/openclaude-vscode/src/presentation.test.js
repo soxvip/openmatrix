@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 
 function loadPresentation() {
@@ -23,7 +23,7 @@ test('truncateMiddle keeps the filename visible for Windows-style paths', () => 
   );
 });
 
-test('buildActionModel disables workspace-root launch without a workspace', () => {
+test('buildActionModel uses Portuguese labels and disables workspace-root launch without a workspace', () => {
   const { buildActionModel } = loadPresentation();
 
   const model = buildActionModel({
@@ -33,8 +33,8 @@ test('buildActionModel disables workspace-root launch without a workspace', () =
 
   assert.deepEqual(model.launchRoot, {
     id: 'launchRoot',
-    label: 'Launch in Workspace Root',
-    detail: 'Open a workspace folder to enable workspace-root launch',
+    label: 'Iniciar na Raiz do Espaço de Trabalho',
+    detail: 'Abra uma pasta de espaço de trabalho para habilitar a inicialização na raiz',
     tone: 'neutral',
     disabled: true,
   });
@@ -50,8 +50,8 @@ test('buildActionModel hides workspace-profile action when no profile exists', (
 
   assert.deepEqual(model.primary, {
     id: 'launch',
-    label: 'Launch OpenClaude',
-    detail: 'Use the resolved project-aware launch directory',
+    label: 'Iniciar OPEN MATRIX',
+    detail: 'Usa o diretório de inicialização inteligente do projeto',
     tone: 'accent',
     disabled: false,
   });
@@ -68,8 +68,8 @@ test('buildActionModel includes workspace-profile action when a profile exists',
 
   assert.deepEqual(model.openProfile, {
     id: 'openProfile',
-    label: 'Open Workspace Profile',
-    detail: 'Inspect ...\\.openclaude-profile.json',
+    label: 'Abrir Perfil do Espaço de Trabalho',
+    detail: 'Inspecionar ...\\.openclaude-profile.json',
     tone: 'neutral',
     disabled: false,
   });
@@ -78,24 +78,26 @@ test('buildActionModel includes workspace-profile action when a profile exists',
 function createStatus(overrides = {}) {
   return {
     installed: true,
-    executable: 'openclaude',
-    launchCommand: 'openclaude --project-aware',
-    terminalName: 'OpenClaude',
+    executable: 'open-matrix',
+    launchCommand: 'open-matrix --project-aware',
+    terminalName: 'OPEN MATRIX',
     shimEnabled: false,
-    workspaceFolder: '/workspace/openclaude',
-    workspaceSourceLabel: 'active editor workspace',
-    launchCwd: '/workspace/openclaude',
-    launchCwdLabel: '/workspace/openclaude',
+    workspaceFolder: '/workspace/openmatrix',
+    workspaceSourceLabel: 'espaco de trabalho do editor ativo',
+    launchCwd: '/workspace/openmatrix',
+    launchCwdLabel: '/workspace/openmatrix',
     canLaunchInWorkspaceRoot: true,
-    profileStatusLabel: 'Found',
-    profileStatusHint: '/workspace/openclaude/.openclaude-profile.json',
-    workspaceProfilePath: '/workspace/openclaude/.openclaude-profile.json',
+    profileStatusLabel: 'Encontrado',
+    profileStatusHint: '/workspace/openmatrix/.openclaude-profile.json',
+    workspaceProfilePath: '/workspace/openmatrix/.openclaude-profile.json',
+    permissionMode: 'bypassPermissions',
+    toolsMode: 'default',
     providerState: {
       label: 'Codex',
       detail: 'gpt-5.4',
       source: 'profile',
     },
-    providerSourceLabel: 'saved profile',
+    providerSourceLabel: 'perfil salvo',
     ...overrides,
   };
 }
@@ -107,7 +109,7 @@ test('buildControlCenterViewModel keeps header badges and summary cards non-redu
   const headerKeys = new Set(viewModel.headerBadges.map(badge => badge.key));
   const summaryKeys = new Set(viewModel.summaryCards.map(card => card.key));
 
-  assert.deepEqual([...headerKeys].sort(), ['profileStatus', 'provider', 'runtime']);
+  assert.deepEqual([...headerKeys].sort(), ['power', 'profileStatus', 'provider', 'runtime']);
   assert.deepEqual([...summaryKeys].sort(), ['launchCommand', 'launchCwd', 'workspace']);
 
   for (const key of headerKeys) {
@@ -120,33 +122,39 @@ test('buildControlCenterViewModel uses stable semantic tones for badges and acti
 
   const viewModel = buildControlCenterViewModel(createStatus({
     installed: false,
-    profileStatusLabel: 'Invalid',
+    profileStatusLabel: 'Inválido',
     providerState: {
       label: 'OpenAI-compatible (provider unknown)',
       detail: 'launch shim enabled',
       source: 'shim',
     },
-    providerSourceLabel: 'launch setting',
+    providerSourceLabel: 'configuração de inicialização',
   }));
 
   assert.deepEqual(viewModel.headerBadges, [
     {
       key: 'runtime',
-      label: 'Runtime',
-      value: 'Missing',
+      label: 'Executável',
+      value: 'Ausente',
       tone: 'critical',
     },
     {
       key: 'provider',
-      label: 'Provider',
-      value: 'OpenAI-compatible (provider unknown)',
+      label: 'Provedor',
+      value: 'IA configurada',
       tone: 'warning',
     },
     {
       key: 'profileStatus',
-      label: 'Profile',
-      value: 'Invalid',
+      label: 'Perfil',
+      value: 'Inválido',
       tone: 'warning',
+    },
+    {
+      key: 'power',
+      label: 'Poderes',
+      value: 'Poder total',
+      tone: 'positive',
     },
   ]);
 
@@ -154,50 +162,39 @@ test('buildControlCenterViewModel uses stable semantic tones for badges and acti
   assert.equal(viewModel.actions.launchRoot.tone, 'neutral');
 });
 
-test('buildControlCenterViewModel uses a concise project summary before full path detail', () => {
+test('buildControlCenterViewModel uses Portuguese layout and hides model details', () => {
   const { buildControlCenterViewModel } = loadPresentation();
 
   const viewModel = buildControlCenterViewModel(createStatus());
 
-  assert.deepEqual(viewModel.detailSections, [
-    {
-      title: 'Project',
-      rows: [
-        {
-          key: 'workspace',
-          label: 'Workspace folder',
-          summary: 'openclaude',
-          detail: '/workspace/openclaude · active editor workspace',
-        },
-        {
-          key: 'profileStatus',
-          label: 'Workspace profile',
-          summary: 'Found',
-          detail: '/workspace/openclaude/.openclaude-profile.json',
-          tone: 'neutral',
-        },
-      ],
-    },
-    {
-      title: 'Runtime',
-      rows: [
-        {
-          key: 'runtime',
-          label: 'OpenClaude executable',
-          summary: 'Installed',
-          detail: 'openclaude',
-          tone: 'positive',
-        },
-        {
-          key: 'provider',
-          label: 'Detected provider',
-          summary: 'Codex',
-          detail: 'gpt-5.4 · saved profile',
-          tone: 'neutral',
-        },
-      ],
-    },
-  ]);
+  assert.equal(viewModel.header.eyebrow, 'Centro de Controle do OPEN MATRIX');
+  assert.equal(viewModel.detailSections[0].title, 'Projeto');
+  assert.equal(viewModel.detailSections[1].title, 'Executável');
+
+  const provider = viewModel.detailSections[1].rows.find(row => row.key === 'provider');
+  assert.deepEqual(provider, {
+    key: 'provider',
+    label: 'Provedor detectado',
+    summary: 'IA configurada',
+    detail: 'Modelo oculto',
+    tone: 'neutral',
+  });
+  assert.doesNotEqual(provider.detail, 'gpt-5.4 · perfil salvo');
+});
+
+test('buildControlCenterViewModel includes chat power state', () => {
+  const { buildControlCenterViewModel } = loadPresentation();
+
+  const viewModel = buildControlCenterViewModel(createStatus({ permissionMode: 'plan' }));
+  const power = viewModel.detailSections[1].rows.find(row => row.key === 'power');
+
+  assert.deepEqual(power, {
+    key: 'power',
+    label: 'Poderes do chat',
+    summary: 'Modo plano',
+    detail: 'ferramentas default - plan',
+    tone: 'warning',
+  });
 });
 
 test('buildControlCenterViewModel keeps launch command only in summary cards', () => {
@@ -207,78 +204,15 @@ test('buildControlCenterViewModel keeps launch command only in summary cards', (
 
   assert.deepEqual(viewModel.summaryCards.find(card => card.key === 'launchCommand'), {
     key: 'launchCommand',
-    label: 'Launch command',
-    value: 'openclaude --project-aware',
-    detail: 'Integrated terminal: OpenClaude',
+    label: 'Comando de Inicialização',
+    value: 'open-matrix --project-aware',
+    detail: 'Terminal integrado: OPEN MATRIX',
   });
 
   assert.equal(
     viewModel.detailSections.some(section => section.rows.some(row => row.key === 'launchCommand')),
     false,
   );
-});
-
-test('buildControlCenterViewModel keeps env-backed provider detail non-redundant', () => {
-  const { buildControlCenterViewModel } = loadPresentation();
-
-  const viewModel = buildControlCenterViewModel(createStatus({
-    providerState: {
-      label: 'Gemini',
-      detail: 'from environment',
-      source: 'env',
-    },
-    providerSourceLabel: 'environment',
-  }));
-
-  assert.deepEqual(viewModel.detailSections[1].rows.find(row => row.key === 'provider'), {
-    key: 'provider',
-    label: 'Detected provider',
-    summary: 'Gemini',
-    detail: 'from environment',
-    tone: 'neutral',
-  });
-});
-
-test('buildControlCenterViewModel keeps shim-backed provider detail honest', () => {
-  const { buildControlCenterViewModel } = loadPresentation();
-
-  const viewModel = buildControlCenterViewModel(createStatus({
-    providerState: {
-      label: 'OpenAI-compatible (provider unknown)',
-      detail: 'launch shim enabled',
-      source: 'shim',
-    },
-    providerSourceLabel: 'launch setting',
-  }));
-
-  assert.deepEqual(viewModel.detailSections[1].rows.find(row => row.key === 'provider'), {
-    key: 'provider',
-    label: 'Detected provider',
-    summary: 'OpenAI-compatible (provider unknown)',
-    detail: 'launch shim enabled',
-    tone: 'warning',
-  });
-});
-
-test('buildControlCenterViewModel keeps unknown provider detail honest', () => {
-  const { buildControlCenterViewModel } = loadPresentation();
-
-  const viewModel = buildControlCenterViewModel(createStatus({
-    providerState: {
-      label: 'Unknown',
-      detail: 'no saved profile or provider env detected',
-      source: 'unknown',
-    },
-    providerSourceLabel: 'unknown',
-  }));
-
-  assert.deepEqual(viewModel.detailSections[1].rows.find(row => row.key === 'provider'), {
-    key: 'provider',
-    label: 'Detected provider',
-    summary: 'Unknown',
-    detail: 'no saved profile or provider env detected',
-    tone: 'warning',
-  });
 });
 
 test('buildControlCenterViewModel carries forward the existing action model', () => {

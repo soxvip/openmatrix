@@ -55,12 +55,12 @@ function serializeStdinMessage(msg) {
   return JSON.stringify(msg) + '\n';
 }
 
-function buildUserMessage(text) {
+function buildUserMessage(content) {
   return {
     type: 'user',
     message: {
       role: 'user',
-      content: text,
+      content,
     },
     parent_tool_use_id: null,
   };

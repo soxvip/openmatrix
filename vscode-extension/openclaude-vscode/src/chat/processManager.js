@@ -1,5 +1,5 @@
 /**
- * ProcessManager — spawns OpenClaude in print/SDK mode and manages the
+ * ProcessManager â€” spawns OpenClaude in print/SDK mode and manages the
  * NDJSON stdin/stdout lifecycle.
  *
  * Usage:
@@ -14,31 +14,97 @@
  *   pm.dispose();
  */
 
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const vscode = require('vscode');
 const { parseStdoutLine, serializeStdinMessage, buildUserMessage, buildControlResponse } = require('./protocol');
+
+
+function buildProcessArgs({
+  permissionMode = 'bypassPermissions',
+  sessionId = null,
+  continueSession = false,
+  model = null,
+  extraArgs = [],
+  appendSystemPrompt = '',
+} = {}) {
+  const args = [
+    '--print',
+    '--verbose',
+    '--input-format=stream-json',
+    '--output-format=stream-json',
+    '--include-partial-messages',
+    '--tools', 'default',
+    '--permission-mode', permissionMode || 'bypassPermissions',
+  ];
+
+  if (sessionId) {
+    args.push('--resume', sessionId);
+  } else if (continueSession) {
+    args.push('--continue');
+  }
+
+  if (model) {
+    args.push('--model', model);
+  }
+
+  if (appendSystemPrompt) {
+    args.push('--append-system-prompt', String(appendSystemPrompt));
+  }
+
+  args.push(...(Array.isArray(extraArgs) ? extraArgs : []));
+  return args;
+}
+
+function quoteCmdArg(value) {
+  const str = String(value ?? '');
+  if (!str) return '""';
+  if (!/[\s"&()^|<>]/.test(str)) return str;
+  return '"' + str.replace(/"/g, '\\"') + '"';
+}
+
+function withPdfToolPath(env) {
+  if (process.platform !== 'win32') return env;
+  if (env.OPEN_MATRIX_POPPLER_PATH) return env;
+
+  const userProfile = env.USERPROFILE || process.env.USERPROFILE;
+  if (!userProfile) return env;
+
+  const extraPath = `${userProfile}\\bin`;
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'Path';
+  const currentPath = env[pathKey] || '';
+  const entries = currentPath.split(';').filter(Boolean);
+
+  if (entries.some((entry) => entry.toLowerCase() === extraPath.toLowerCase())) return env;
+
+  return { ...env, [pathKey]: currentPath ? `${extraPath};${currentPath}` : extraPath };
+}
 
 class ProcessManager {
   /**
    * @param {object} opts
-   * @param {string} opts.command - The openclaude binary (e.g. 'openclaude')
+   * @param {string} opts.command - The open-matrix binary (e.g. 'open-matrix')
    * @param {string} [opts.cwd] - Working directory
    * @param {Record<string,string>} [opts.env] - Extra env vars
    * @param {string} [opts.sessionId] - Session to resume
    * @param {boolean} [opts.continueSession] - Use --continue instead of --resume
    * @param {string} [opts.model] - Model override
    * @param {string[]} [opts.extraArgs] - Additional CLI flags
+   * @param {string} [opts.appendSystemPrompt] - Extra system prompt guidance
    */
   constructor(opts) {
-    this._command = opts.command || 'openclaude';
+    this._command = opts.command || 'open-matrix';
     this._cwd = opts.cwd || undefined;
     this._env = opts.env || {};
     this._sessionId = opts.sessionId || null;
     this._continueSession = opts.continueSession || false;
     this._model = opts.model || null;
-    this._permissionMode = opts.permissionMode || 'acceptEdits';
+    this._permissionMode = opts.permissionMode || 'bypassPermissions';
     this._extraArgs = opts.extraArgs || [];
+    this._appendSystemPrompt = opts.appendSystemPrompt || '';
+    this._execFile = typeof opts.execFile === 'function' ? opts.execFile : execFile;
     this._process = null;
+    this._abortTimer = null;
+    this._aborting = false;
     this._buffer = '';
     this._disposed = false;
 
@@ -62,35 +128,23 @@ class ProcessManager {
     if (this._disposed) throw new Error('ProcessManager is disposed');
     if (this._process) throw new Error('Process already started');
 
-    const args = [
-      '--print',
-      '--verbose',
-      '--input-format=stream-json',
-      '--output-format=stream-json',
-      '--include-partial-messages',
-      '--permission-mode', this._permissionMode || 'acceptEdits',
-    ];
+    const args = buildProcessArgs({
+      permissionMode: this._permissionMode,
+      sessionId: this._sessionId,
+      continueSession: this._continueSession,
+      model: this._model,
+      extraArgs: this._extraArgs,
+      appendSystemPrompt: this._appendSystemPrompt,
+    });
 
-    if (this._sessionId) {
-      args.push('--resume', this._sessionId);
-    } else if (this._continueSession) {
-      args.push('--continue');
-    }
-
-    if (this._model) {
-      args.push('--model', this._model);
-    }
-
-    args.push(...this._extraArgs);
-
-    const spawnEnv = { ...process.env, ...this._env };
+    const spawnEnv = withPdfToolPath({ ...process.env, ...this._env });
     const isWin = process.platform === 'win32';
 
     if (isWin) {
       // On Windows, npm global installs create .cmd shims that spawn()
       // cannot find without a shell.  Build one command string so the
       // deprecation warning about unsanitised args does not fire.
-      const cmdLine = [this._command, ...args].join(' ');
+      const cmdLine = [this._command, ...args].map(quoteCmdArg).join(' ');
       this._process = spawn(cmdLine, [], {
         cwd: this._cwd,
         env: spawnEnv,
@@ -114,6 +168,8 @@ class ProcessManager {
     this._process.stderr.on('data', (chunk) => this._onStderr(chunk));
     this._process.on('error', (err) => this._onErrorEmitter.fire(err));
     this._process.on('close', (code, signal) => {
+      this._clearAbortTimer();
+      this._aborting = false;
       this._process = null;
       this._onExitEmitter.fire({ code, signal });
     });
@@ -142,13 +198,15 @@ class ProcessManager {
   _onStderr(chunk) {
     const trimmed = chunk.trim();
     if (!trimmed) return;
-    // Suppress common non-error noise from the CLI (deprecation warnings, etc.)
+    // Suppress common non-error noise from the CLI (deprecation warnings, model metadata warnings, etc.)
     if (/^\(node:\d+\)|^DeprecationWarning|^ExperimentalWarning/i.test(trimmed)) return;
+    if (/^\[context\] Warning:/i.test(trimmed)) return;
+    if (/^\.\.\. \(\d+ duplicate lines\)/i.test(trimmed)) return;
     this._onErrorEmitter.fire(new Error(trimmed));
   }
 
-  sendUserMessage(text) {
-    this._write(buildUserMessage(text));
+  sendUserMessage(content) {
+    this._write(buildUserMessage(content));
   }
 
   sendControlResponse(requestId, result) {
@@ -167,13 +225,37 @@ class ProcessManager {
   }
 
   abort() {
-    if (this._process && !this._process.killed) {
-      if (process.platform === 'win32') {
-        this._process.kill('SIGINT');
-      } else {
-        this._process.kill('SIGINT');
-      }
+    if (!this._process || this._process.killed || this._aborting) return;
+
+    this._aborting = true;
+    this._process.kill('SIGINT');
+    this._abortTimer = setTimeout(() => this._forceKillProcess(), 1500);
+    if (this._abortTimer.unref) this._abortTimer.unref();
+  }
+
+  _clearAbortTimer() {
+    if (!this._abortTimer) return;
+    clearTimeout(this._abortTimer);
+    this._abortTimer = null;
+  }
+
+  _forceKillProcess() {
+    this._abortTimer = null;
+    const proc = this._process;
+    if (!proc || proc.killed) return;
+
+    if (process.platform === 'win32' && proc.pid) {
+      this._execFile('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true }, () => {});
+      return;
     }
+
+    proc.kill('SIGTERM');
+    const killTimer = setTimeout(() => {
+      if (this._process && !this._process.killed) {
+        this._process.kill('SIGKILL');
+      }
+    }, 1500);
+    if (killTimer.unref) killTimer.unref();
   }
 
   kill() {
@@ -184,6 +266,7 @@ class ProcessManager {
 
   dispose() {
     this._disposed = true;
+    this._clearAbortTimer();
     this.kill();
     this._onMessageEmitter.dispose();
     this._onErrorEmitter.dispose();
@@ -191,4 +274,4 @@ class ProcessManager {
   }
 }
 
-module.exports = { ProcessManager };
+module.exports = { ProcessManager, buildProcessArgs, withPdfToolPath };

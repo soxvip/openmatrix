@@ -864,6 +864,10 @@ async function run(): Promise<CommanderCommand> {
   // Use preAction hook to run initialization only when executing a command,
   // not when displaying help. This avoids the need for env variable signaling.
   program.hook('preAction', async thisCommand => {
+    if (process.argv[2] === 'setup') {
+      return
+    }
+
     await Promise.all([ensureMdmSettingsLoaded(), ensureKeychainPrefetchCompleted()]);
     await init();
     profileCheckpoint('preAction_after_init');
@@ -3847,6 +3851,21 @@ async function run(): Promise<CommanderCommand> {
     profileCheckpoint('run_after_parse');
     return program;
   }
+
+
+  // open-matrix setup
+  program.command('setup')
+    .description('Configure OPEN MATRIX Gateway by asking only for your token')
+    .option('--token-stdin', 'Read OPEN MATRIX token from stdin')
+    .option('--json', 'Print setup result as JSON without secrets')
+    .action(async (options: { tokenStdin?: boolean; json?: boolean }) => {
+      const { openMatrixSetupHandler } = await import('./cli/handlers/openMatrixSetup.js')
+      await openMatrixSetupHandler({
+        tokenStdin: Boolean(options.tokenStdin),
+        json: Boolean(options.json),
+      })
+      process.exit(0)
+    })
 
   // claude mcp
 

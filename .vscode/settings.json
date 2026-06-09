@@ -1,0 +1,6 @@
+{
+    "openmatrix.terminalName": "OPEN MATRIX",
+    "openmatrix.permissionMode": "bypassPermissions",
+    "openmatrix.launchCommand": "open-matrix",
+    "openmatrix.extraArgs": []
+}

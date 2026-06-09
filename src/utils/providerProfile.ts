@@ -49,6 +49,15 @@ export const DEFAULT_MISTRAL_MODEL = 'mistral-vibe-cli-latest'
 export const DEFAULT_STARTUP_PROVIDER_ENV_VAR =
   'CLAUDE_CODE_DEFAULT_STARTUP_PROVIDER'
 
+const isAbsoluteHttpUrl = (value: string) => {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 const PROFILE_ENV_KEYS = [
   'CLAUDE_CODE_USE_OPENAI',
   'CLAUDE_CODE_USE_GITHUB',
@@ -629,11 +638,23 @@ export function buildOpenAIProfileEnv(options: {
   processEnv?: NodeJS.ProcessEnv
 }): ProfileEnv | null {
   const processEnv = options.processEnv ?? process.env
-  const key = sanitizeApiKey(options.apiKey ?? processEnv.OPENAI_API_KEY)
+  const optionApiKey = options.apiKey?.trim() ? options.apiKey : undefined
+  const optionAuthHeaderValue = options.authHeaderValue?.trim()
+    ? options.authHeaderValue
+    : undefined
+  const key = sanitizeApiKey(optionApiKey ?? processEnv.OPENAI_API_KEY)
   const authHeaderValue = sanitizeApiKey(
-    options.authHeaderValue ?? processEnv.OPENAI_AUTH_HEADER_VALUE,
+    optionAuthHeaderValue ?? processEnv.OPENAI_AUTH_HEADER_VALUE,
   )
-  if (!key && !authHeaderValue) {
+  const requestedBaseUrl = sanitizeProviderConfigValue(options.baseUrl, {
+    OPENAI_API_KEY: key,
+    OPENAI_AUTH_HEADER_VALUE: authHeaderValue,
+  })
+  const allowKeylessCustomBaseUrl =
+    Boolean(requestedBaseUrl) &&
+    requestedBaseUrl !== DEFAULT_OPENAI_BASE_URL &&
+    isAbsoluteHttpUrl(requestedBaseUrl)
+  if (!key && !authHeaderValue && !allowKeylessCustomBaseUrl) {
     return null
   }
 

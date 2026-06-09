@@ -75,6 +75,35 @@ function getProviderTone(providerState) {
     : 'neutral';
 }
 
+function getPowerSummary(permissionMode) {
+  switch (permissionMode) {
+    case 'bypassPermissions':
+      return 'Poder total';
+    case 'acceptEdits':
+      return 'Modo seguro';
+    case 'plan':
+      return 'Modo plano';
+    default:
+      return 'Padrao';
+  }
+}
+
+function getPowerTone(permissionMode) {
+  return permissionMode === 'bypassPermissions'
+    ? 'positive'
+    : permissionMode === 'plan'
+      ? 'warning'
+      : 'neutral';
+}
+
+function getPowerDetail(status = {}) {
+  const permissionMode = status.permissionMode || 'bypassPermissions';
+  const extra = Array.isArray(status.extraArgs) && status.extraArgs.length > 0
+    ? ` - extra: ${status.extraArgs.join(' ')}`
+    : '';
+  return `ferramentas ${status.toolsMode || 'default'} - ${permissionMode}${extra}`;
+}
+
 function getProviderDetail(providerState, providerSourceLabel) {
   const detail = providerState?.detail || '';
   if (!detail) {
@@ -99,8 +128,12 @@ function getProviderDetail(providerState, providerSourceLabel) {
 function buildControlCenterViewModel(status = {}) {
   const runtimeSummary = status.installed ? 'Instalado' : 'Ausente';
   const runtimeDetail = status.executable || 'Comando desconhecido';
-  const providerDetail = getProviderDetail(status.providerState, status.providerSourceLabel);
+  const providerDetail = 'Modelo oculto';
   const providerTone = getProviderTone(status.providerState);
+  const providerSummary = status.providerState?.label ? 'IA configurada' : 'Desconhecido';
+  const permissionMode = status.permissionMode || 'bypassPermissions';
+  const powerSummary = getPowerSummary(permissionMode);
+  const powerDetail = getPowerDetail(status);
   const workspaceSummary = status.workspaceFolder ? getPathTail(status.workspaceFolder) : 'Nenhum espaço de trabalho aberto';
   const workspaceDetail = [status.workspaceFolder, status.workspaceSourceLabel]
     .filter(Boolean)
@@ -123,7 +156,7 @@ function buildControlCenterViewModel(status = {}) {
       {
         key: 'provider',
         label: 'Provedor',
-        value: status.providerState?.label || 'Desconhecido',
+        value: providerSummary,
         tone: providerTone,
       },
       {
@@ -131,6 +164,12 @@ function buildControlCenterViewModel(status = {}) {
         label: 'Perfil',
         value: status.profileStatusLabel || 'Desconhecido',
         tone: getProfileTone(status.profileStatusLabel),
+      },
+      {
+        key: 'power',
+        label: 'Poderes',
+        value: powerSummary,
+        tone: getPowerTone(permissionMode),
       },
     ],
     summaryCards: [
@@ -184,9 +223,16 @@ function buildControlCenterViewModel(status = {}) {
           {
             key: 'provider',
             label: 'Provedor detectado',
-            summary: status.providerState?.label || 'Desconhecido',
+            summary: providerSummary,
             detail: providerDetail,
             tone: providerTone,
+          },
+          {
+            key: 'power',
+            label: 'Poderes do chat',
+            summary: powerSummary,
+            detail: powerDetail,
+            tone: getPowerTone(permissionMode),
           },
         ],
       },

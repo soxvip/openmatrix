@@ -89,6 +89,12 @@ import {
   getStreamStats,
 } from '../../utils/streamingOptimizer.js'
 import { stableStringifyJson } from '../../utils/stableStringify.js'
+import {
+  isDgsisModelFallbackableError,
+  modelFallbackAttemptBudget,
+  modelFallbackKey,
+  selectNextDgsisFallbackModel,
+} from './modelFallback.js'
 
 type SecretValueSource = Partial<{
   OPENAI_API_KEY: string
@@ -99,6 +105,59 @@ type SecretValueSource = Partial<{
   GEMINI_ACCESS_TOKEN: string
   MISTRAL_API_KEY: string
 }>
+
+function extractTextFromContentForLanguage(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value.map(extractTextFromContentForLanguage).filter(Boolean).join(' ')
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return [record.text, record.content, record.input]
+      .map(extractTextFromContentForLanguage)
+      .filter(Boolean)
+      .join(' ')
+  }
+  return ''
+}
+
+function getLatestUserPromptTextForLanguage(messages: unknown): string {
+  if (!Array.isArray(messages)) {
+    return ''
+  }
+
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (!message || typeof message !== 'object') {
+      continue
+    }
+    const record = message as Record<string, unknown>
+    if (record.role !== 'user') {
+      continue
+    }
+    return extractTextFromContentForLanguage(record.content ?? record.message)
+  }
+
+  return ''
+}
+
+function looksLikePortuguesePrompt(text: string): boolean {
+  const normalized = text.toLowerCase()
+  if (/[\u00e1\u00e0\u00e2\u00e3\u00e9\u00ea\u00ed\u00f3\u00f4\u00f5\u00fa\u00e7]/i.test(text)) {
+    return true
+  }
+  return /\b(voce|preciso|quero|faca|por favor|responda|arquivo|arquivos|erro|corrija|corrigir|crie|editar|portugues)\b/.test(normalized)
+}
+
+function localizeDgsisFinalError(message: string): string {
+  return [
+    'Nao consegui completar a solicitacao porque todos os modelos OPEN MATRIX disponiveis falharam ou atingiram limite temporario.',
+    'Tente novamente em alguns minutos ou selecione outro modelo com /model.',
+    `Detalhe tecnico: ${message}`,
+  ].join('\n')
+}
 
 const GITHUB_429_MAX_RETRIES = 3
 const GITHUB_429_BASE_DELAY_SEC = 1
@@ -2051,6 +2110,10 @@ class OpenAIShimMessages {
       treatAsLocal: isLocalProviderUrl(request.baseUrl),
     })
     const shimConfig = runtimeShimContext.openaiShimConfig
+    const shouldUsePortugueseDgsisErrors =
+      runtimeShimContext.routeId === 'dgsis' &&
+      looksLikePortuguesePrompt(getLatestUserPromptTextForLanguage(params.messages))
+    let activeModel = request.resolvedModel
     // When endpointPath is overridden, the body format must match the target
     // API contract rather than request.transport from providerConfig.
     // - /responses         → OpenAI Responses API (input, max_output_tokens, instructions)
@@ -2073,7 +2136,7 @@ class OpenAIShimMessages {
     })
 
     const body: Record<string, unknown> = {
-      model: request.resolvedModel,
+      model: activeModel,
       messages: openaiMessages,
       stream: params.stream ?? false,
       store: false,
@@ -2190,7 +2253,7 @@ class OpenAIShimMessages {
     let omitResponsesTools = false
     const buildResponsesBody = (): Record<string, unknown> => {
       const responsesBody: Record<string, unknown> = {
-        model: request.resolvedModel,
+        model: activeModel,
         input: convertAnthropicMessagesToResponsesInput(
           params.messages as Array<{
             role?: string
@@ -2254,7 +2317,7 @@ class OpenAIShimMessages {
     let omitAnthropicTools = false
     const buildAnthropicMessagesBody = (): Record<string, unknown> => {
       const anthropicBody: Record<string, unknown> = {
-        model: request.resolvedModel,
+        model: activeModel,
         messages: params.messages,
         max_tokens: params.max_tokens,
         stream: params.stream ?? false,
@@ -2511,7 +2574,7 @@ class OpenAIShimMessages {
       // path and an api-version query parameter.
       if (isAzure) {
         const apiVersion = process.env.AZURE_OPENAI_API_VERSION ?? '2024-12-01-preview'
-        const deployment = encodeURIComponent(request.resolvedModel ?? process.env.OPENAI_MODEL ?? 'gpt-4o')
+        const deployment = encodeURIComponent(activeModel ?? process.env.OPENAI_MODEL ?? 'gpt-4o')
 
         // If base URL already contains /deployments/, use it as-is with api-version.
         if (/\/deployments\//i.test(baseUrl)) {
@@ -2562,7 +2625,7 @@ class OpenAIShimMessages {
         requestUrl = buildRequestUrl(activeBaseUrl)
 
         logForDebugging(
-          `[OpenAIShim] self-heal retry reason=${reason} method=POST from=${redactUrlForDiagnostics(previousUrl)} to=${redactUrlForDiagnostics(requestUrl)} model=${request.resolvedModel}`,
+          `[OpenAIShim] self-heal retry reason=${reason} method=POST from=${redactUrlForDiagnostics(previousUrl)} to=${redactUrlForDiagnostics(requestUrl)} model=${activeModel}`,
           { level: 'warn' },
         )
 
@@ -2623,10 +2686,51 @@ class OpenAIShimMessages {
       signal: options?.signal,
     })
 
+    const attemptedFallbackModels = new Set<string>([
+      modelFallbackKey(activeModel),
+    ])
+
+    const promoteNextDgsisFallbackModel = (
+      status: number,
+      errorBody: string,
+      failure: ReturnType<typeof classifyOpenAIHttpFailure>,
+    ): boolean => {
+      if (!isDgsisModelFallbackableError({
+        routeId: runtimeShimContext.routeId,
+        status,
+        body: errorBody,
+        category: failure.category,
+      })) {
+        return false
+      }
+
+      const nextModel = selectNextDgsisFallbackModel({
+        currentModel: activeModel,
+        attemptedModels: attemptedFallbackModels,
+      })
+      if (!nextModel) {
+        return false
+      }
+
+      const previousModel = activeModel
+      activeModel = nextModel
+      attemptedFallbackModels.add(modelFallbackKey(activeModel))
+      body.model = activeModel
+      refreshSerializedBody()
+
+      logForDebugging(
+        `[OpenAIShim] model fallback route=dgsis status=${status} reason=${failure.category} method=POST url=${redactUrlForDiagnostics(requestUrl)} from=${previousModel} to=${activeModel}`,
+        { level: 'debug' },
+      )
+
+      return true
+    }
+
     const maxSelfHealAttempts = isLocal
       ? localRetryBaseUrls.length + 1
       : 0
-    const maxAttempts = (isGithub ? GITHUB_429_MAX_RETRIES : 1) + maxSelfHealAttempts
+    const maxModelFallbackAttempts = modelFallbackAttemptBudget(runtimeShimContext.routeId, activeModel)
+    const maxAttempts = (isGithub ? GITHUB_429_MAX_RETRIES : 1) + maxSelfHealAttempts + maxModelFallbackAttempts
 
     const throwClassifiedTransportError = (
       error: unknown,
@@ -2650,7 +2754,7 @@ class OpenAIShimMessages {
         ) || 'Request failed'
 
       logForDebugging(
-        `[OpenAIShim] transport failure category=${failure.category} retryable=${failure.retryable} code=${failure.code ?? 'unknown'} method=POST url=${redactedUrl} model=${request.resolvedModel} message=${safeMessage}`,
+        `[OpenAIShim] transport failure category=${failure.category} retryable=${failure.retryable} code=${failure.code ?? 'unknown'} method=POST url=${redactedUrl} model=${activeModel} message=${safeMessage}`,
         { level: 'warn' },
       )
 
@@ -2686,17 +2790,21 @@ class OpenAIShimMessages {
       const redactedUrl = redactUrlForDiagnostics(requestUrl)
 
       logForDebugging(
-        `[OpenAIShim] request failed category=${failure.category} retryable=${failure.retryable} status=${status} method=POST url=${redactedUrl} model=${request.resolvedModel}`,
+        `[OpenAIShim] request failed category=${failure.category} retryable=${failure.retryable} status=${status} method=POST url=${redactedUrl} model=${activeModel}`,
         { level: 'warn' },
+      )
+
+      const errorMessage = buildOpenAICompatibilityErrorMessage(
+        `OpenAI API error ${status}: ${errorBody}${rateHint}`,
+        failureWithUrl,
       )
 
       throw APIError.generate(
         status,
         parsedBody,
-        buildOpenAICompatibilityErrorMessage(
-          `OpenAI API error ${status}: ${errorBody}${rateHint}`,
-          failureWithUrl,
-        ),
+        shouldUsePortugueseDgsisErrors
+          ? localizeDgsisFinalError(errorMessage)
+          : errorMessage,
         responseHeaders,
       )
     }
@@ -2708,7 +2816,7 @@ class OpenAIShimMessages {
       : request.baseUrl.includes('localhost:11434') || request.baseUrl.includes('localhost:11435') ? 'ollama'
       : request.baseUrl.includes('anthropic') ? 'anthropic'
       : 'openai'
-    const { correlationId, startTime } = logApiCallStart(provider, request.resolvedModel)
+    const { correlationId, startTime } = logApiCallStart(provider, activeModel)
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         response = await fetchWithProxyRetry(
@@ -2759,7 +2867,7 @@ class OpenAIShimMessages {
             tokensOut = data.usage?.completion_tokens ?? 0
           } catch { /* ignore */ }
         }
-        logApiCallEnd(correlationId, startTime, request.resolvedModel, 'success', tokensIn, tokensOut, false)
+        logApiCallEnd(correlationId, startTime, activeModel, 'success', tokensIn, tokensOut, false)
         return response
       }
 
@@ -2838,6 +2946,10 @@ class OpenAIShimMessages {
         continue
       }
 
+      if (promoteNextDgsisFallbackModel(response.status, errorBody, failure)) {
+        continue
+      }
+
       const hasToolsPayload =
         effectiveTransport === 'responses' || effectiveTransport === 'anthropic_messages' || effectiveTransport === 'gemini'
           ? Array.isArray(params.tools) && params.tools.length > 0
@@ -2860,7 +2972,7 @@ class OpenAIShimMessages {
         refreshSerializedBody()
 
         logForDebugging(
-          `[OpenAIShim] self-heal retry reason=tool_call_incompatible mode=toolless method=POST url=${redactUrlForDiagnostics(requestUrl)} model=${request.resolvedModel}`,
+          `[OpenAIShim] self-heal retry reason=tool_call_incompatible mode=toolless method=POST url=${redactUrlForDiagnostics(requestUrl)} model=${activeModel}`,
           { level: 'warn' },
         )
         continue

@@ -79,6 +79,7 @@ if (feature('ABLATION_BASELINE') && process.env.CLAUDE_CODE_ABLATION_BASELINE) {
  */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  const isOpenMatrixSetupCommand = args[0] === 'setup'
 
   // Fast-path for --version/-v: zero module loading needed
   if (args.length === 1 && (args[0] === '--version' || args[0] === '-v' || args[0] === '-V')) {
@@ -114,23 +115,25 @@ async function main(): Promise<void> {
     applySafeConfigEnvironmentVariables()
   }
 
-  const hasConfiguredProviderProfile = await (async () => {
-    const { getActiveProviderProfile } = await import('../utils/providerProfiles.js')
-    return getActiveProviderProfile() !== undefined
-  })()
+  if (!isOpenMatrixSetupCommand) {
+    const hasConfiguredProviderProfile = await (async () => {
+      const { getActiveProviderProfile } = await import('../utils/providerProfiles.js')
+      return getActiveProviderProfile() !== undefined
+    })()
 
-  const startupEnv = await buildStartupEnvFromProfile({
-    processEnv: process.env,
-    hasConfiguredProviderProfile,
-  })
-  if (startupEnv !== process.env) {
-    const startupProfileError = await getProviderValidationError(startupEnv)
-    if (startupProfileError && !isDefaultStartupProviderEnv(startupEnv)) {
-      console.error(
-        `Warning: ignoring saved provider profile. ${startupProfileError}`,
-      )
-    } else {
-      applyProfileEnvToProcessEnv(process.env, startupEnv)
+    const startupEnv = await buildStartupEnvFromProfile({
+      processEnv: process.env,
+      hasConfiguredProviderProfile,
+    })
+    if (startupEnv !== process.env) {
+      const startupProfileError = await getProviderValidationError(startupEnv)
+      if (startupProfileError && !isDefaultStartupProviderEnv(startupEnv)) {
+        console.error(
+          `Warning: ignoring saved provider profile. ${startupProfileError}`,
+        )
+      } else {
+        applyProfileEnvToProcessEnv(process.env, startupEnv)
+      }
     }
   }
 
@@ -167,7 +170,7 @@ async function main(): Promise<void> {
   }
 
   // Hydrate GitHub credentials after profile is applied so CLAUDE_CODE_USE_GITHUB from profile is available
-  {
+  if (!isOpenMatrixSetupCommand) {
     const {
       hydrateGithubModelsTokenFromSecureStorage,
       refreshGithubModelsTokenIfNeeded,
@@ -176,7 +179,9 @@ async function main(): Promise<void> {
     hydrateGithubModelsTokenFromSecureStorage()
   }
 
-  await validateProviderEnvForStartupOrExit()
+  if (!isOpenMatrixSetupCommand) {
+    await validateProviderEnvForStartupOrExit()
+  }
 
   // #808: --model alone (no --provider) — route to the env var matching the
   // active provider before the banner prints so the override is visible.
@@ -190,8 +195,10 @@ async function main(): Promise<void> {
   const earlyModelFlag = eagerParseCliFlag('--model')
 
   // Print the gradient startup screen before the Ink UI loads
-  const { printStartupScreen } = await import('../components/StartupScreen.js')
-  printStartupScreen(earlyModelFlag)
+  if (!isOpenMatrixSetupCommand) {
+    const { printStartupScreen } = await import('../components/StartupScreen.js')
+    printStartupScreen(earlyModelFlag)
+  }
 
   // For all other paths, load the startup profiler
   const {

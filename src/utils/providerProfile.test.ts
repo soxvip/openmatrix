@@ -169,6 +169,45 @@ test('openai launch omits api key when no key is resolved', async () => {
   assert.equal(Object.hasOwn(env, 'OPENAI_API_KEY'), false)
 })
 
+test('openai profile env allows custom base URL without api key', () => {
+  const env = buildOpenAIProfileEnv({
+    goal: 'balanced',
+    apiKey: '',
+    authHeaderValue: '   ',
+    baseUrl: 'https://gtw.dgsis.com.br/v1',
+    model: 'cx/gpt-5.5',
+    processEnv: {},
+  })
+
+  assert.deepEqual(env, {
+    OPENAI_BASE_URL: 'https://gtw.dgsis.com.br/v1',
+    OPENAI_MODEL: 'cx/gpt-5.5',
+  })
+})
+
+test('openai profile env still requires credentials for default OpenAI base URL', () => {
+  const env = buildOpenAIProfileEnv({
+    goal: 'balanced',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o',
+    processEnv: {},
+  })
+
+  assert.equal(env, null)
+})
+
+test('openai profile env requires absolute custom base URL without credentials', () => {
+  const env = buildOpenAIProfileEnv({
+    goal: 'balanced',
+    apiKey: '',
+    baseUrl: '/v1',
+    model: 'cx/gpt-5.5',
+    processEnv: {},
+  })
+
+  assert.equal(env, null)
+})
+
 test('xai launch uses descriptor defaults and persisted xAI key', async () => {
   const env = await buildLaunchEnv({
     profile: 'xai',

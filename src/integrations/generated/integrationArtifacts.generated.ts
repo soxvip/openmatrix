@@ -19,6 +19,7 @@ import gatewayBedrock from '../gateways/bedrock.js'
 import gatewayCustom from '../gateways/custom.js'
 import gatewayDashscopeCn from '../gateways/dashscope-cn.js'
 import gatewayDashscopeIntl from '../gateways/dashscope-intl.js'
+import gatewayDgsis from '../gateways/dgsis.js'
 import gatewayGithub from '../gateways/github.js'
 import gatewayGitlawbOpengateway from '../gateways/gitlawb-opengateway.js'
 import gatewayGroq from '../gateways/groq.js'
@@ -64,7 +65,7 @@ import modelXai from '../models/xai.js'
 import modelXiaomiMimo from '../models/xiaomi-mimo.js'
 
 export const VENDOR_DESCRIPTORS = [vendorAnthropic, vendorBankr, vendorDeepseek, vendorGemini, vendorMinimax, vendorMoonshot, vendorOpenai, vendorVenice, vendorXai, vendorXiaomiMimo, vendorZai] as const satisfies readonly VendorDescriptor[]
-export const GATEWAY_DESCRIPTORS = [gatewayAtomicChat, gatewayAzureOpenai, gatewayBedrock, gatewayCustom, gatewayDashscopeCn, gatewayDashscopeIntl, gatewayGithub, gatewayGitlawbOpengateway, gatewayGroq, gatewayHicap, gatewayKimiCode, gatewayLmstudio, gatewayMistral, gatewayNvidiaNim, gatewayOllama, gatewayOpencodeGo, gatewayOpencode, gatewayOpenrouter, gatewayTogether, gatewayVertex] as const satisfies readonly GatewayDescriptor[]
+export const GATEWAY_DESCRIPTORS = [gatewayAtomicChat, gatewayAzureOpenai, gatewayBedrock, gatewayCustom, gatewayDashscopeCn, gatewayDashscopeIntl, gatewayDgsis, gatewayGithub, gatewayGitlawbOpengateway, gatewayGroq, gatewayHicap, gatewayKimiCode, gatewayLmstudio, gatewayMistral, gatewayNvidiaNim, gatewayOllama, gatewayOpencodeGo, gatewayOpencode, gatewayOpenrouter, gatewayTogether, gatewayVertex] as const satisfies readonly GatewayDescriptor[]
 export const ANTHROPIC_PROXY_DESCRIPTORS = [] as const satisfies readonly AnthropicProxyDescriptor[]
 export const BRAND_DESCRIPTORS = [brandClaude, brandDeepseek, brandGemini, brandGlm, brandGpt, brandKimi, brandLlama, brandMinimax, brandMistral, brandNemotron, brandOpenaiCompatibleAlias, brandQwen, brandXai, brandXiaomiMimo] as const satisfies readonly BrandDescriptor[]
 export const MODEL_DESCRIPTOR_GROUPS = [modelClaude, modelDeepseek, modelGemini, modelGlm, modelGpt, modelKimi, modelLlama, modelMinimax, modelMistral, modelNemotron, modelOpenaiCompatibleAlias, modelOpencode, modelQwen, modelXai, modelXiaomiMimo] as const satisfies readonly (readonly ModelDescriptor[])[]
@@ -294,6 +295,32 @@ export const PROVIDER_PRESET_MANIFEST = [
     ]
   },
   {
+    "preset": "dgsis",
+    "routeKind": "gateway",
+    "routeId": "dgsis",
+    "vendorId": "openai",
+    "gatewayId": "dgsis",
+    "description": "OPEN MATRIX Gateway - setup asks only for your token",
+    "label": "OPEN MATRIX Gateway",
+    "name": "OPEN MATRIX",
+    "apiKeyEnvVars": [
+      "OPEN_MATRIX_API_KEY"
+    ],
+    "baseUrlEnvVars": [
+      "DGSIS_BASE_URL",
+      "OPENAI_BASE_URL"
+    ],
+    "modelEnvVars": [
+      "OPENAI_MODEL"
+    ],
+    "fallbackBaseUrl": "https://gtw.dgsis.com.br/v1",
+    "fallbackModel": "cx/gpt-5.5",
+    "badge": {
+      "text": "Recommended",
+      "color": "success"
+    }
+  },
+  {
     "preset": "openai",
     "routeKind": "vendor",
     "routeId": "openai",
@@ -455,6 +482,7 @@ export const ORDERED_PROVIDER_PRESETS = [
   "moonshotai",
   "kimi-code",
   "nvidia-nim",
+  "dgsis",
   "openai",
   "opencode-go",
   "opencode",

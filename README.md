@@ -68,6 +68,29 @@ OpenClaude is also mirrored to GitLawb:
 
 ## Quick Start
 
+### OPEN MATRIX commercial quick install
+
+Windows PowerShell:
+
+```powershell
+iwr https://raw.githubusercontent.com/prdigennaro/openmatrix/main/scripts/install.ps1 -UseB | iex
+```
+
+macOS/Linux terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/prdigennaro/openmatrix/main/scripts/install.sh | bash
+```
+
+The installer asks only for your OPEN MATRIX token, configures `https://gtw.dgsis.com.br/v1`, installs/updates `@gitlawb/openclaude`, and tries to install the VS Code extension when the `code` command is available.
+
+Manual setup after npm install:
+
+```bash
+open-matrix setup
+open-matrix
+```
+
 ### Install
 
 ```bash

@@ -15,6 +15,113 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+
+const FAVORITE_SLASH_COMMANDS = [
+  { command: '/full', description: 'Ativar Poder total (tools default + bypassPermissions)', local: true },
+  { command: '/safe', description: 'Modo seguro: auto-aprova edicoes, reduz risco', local: true },
+  { command: '/plan', description: 'Modo planejamento: sem edicoes de arquivo', local: true },
+  { command: '/cost', description: 'Mostrar custo e uso da sessao' },
+  { command: '/context', description: 'Mostrar contexto carregado' },
+  { command: '/compact', description: 'Compactar conversa/contexto' },
+  { command: '/review', description: 'Revisar alteracoes do projeto' },
+  { command: '/security-review', description: 'Revisao de seguranca' },
+  { command: '/commit-message', description: 'Configurar ou gerar mensagem de commit', requiresArgument: true, argumentHint: 'status | default | off | set "..."' },
+  { command: '/init', description: 'Criar/atualizar memoria e config do projeto' },
+  { command: '/auto-fix', description: 'Configurar auto-fix apos edicoes' },
+  { command: '/debug', description: 'Ativar filtro de debug', requiresArgument: true, argumentHint: 'api,hooks | !file' },
+  { command: '/update-config', description: 'Atualizar configuracao', requiresArgument: true, argumentHint: '<configuracao>' },
+];
+
+const SLASH_COMMAND_METADATA = new Map(
+  FAVORITE_SLASH_COMMANDS.map(item => [item.command, item]),
+);
+
+const DEFAULT_DYNAMIC_SLASH_COMMANDS = [
+  'update-config',
+  'debug',
+  'simplify',
+  'batch',
+  'loop',
+  'auto-fix',
+  'cache-stats',
+  'compact',
+  'commit-message',
+  'context',
+  'cost',
+  'dream',
+  'heapdump',
+  'init',
+  'knowledge',
+  'pr-comments',
+  'release-notes',
+  'request-size',
+  'review',
+  'security-review',
+  'insights',
+];
+
+function normalizeSlashCommand(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.startsWith('/') ? text : `/${text}`;
+}
+
+function buildSlashCommandItems(dynamicCommands = []) {
+  const seen = new Set();
+  const result = [];
+  for (const item of FAVORITE_SLASH_COMMANDS) {
+    result.push({
+      ...item,
+      source: 'favorite',
+      requiresArgument: Boolean(item.requiresArgument),
+      local: Boolean(item.local),
+    });
+    seen.add(item.command);
+  }
+
+  for (const raw of dynamicCommands || []) {
+    const command = normalizeSlashCommand(raw);
+    if (!command || seen.has(command)) continue;
+    const meta = SLASH_COMMAND_METADATA.get(command) || {};
+    result.push({
+      command,
+      description: meta.description || 'Comando da CLI OPEN MATRIX',
+      source: 'cli',
+      requiresArgument: Boolean(meta.requiresArgument),
+      argumentHint: meta.argumentHint || '',
+      local: false,
+    });
+    seen.add(command);
+  }
+  return result;
+}
+
+function filterSlashCommandItems(items, query) {
+  const needle = String(query || '').trim().replace(/^[/]/, '').toLowerCase();
+  if (!needle) return items;
+  return (items || [])
+    .map((item, index) => {
+      const command = String(item.command || '').replace(/^[/]/, '').toLowerCase();
+      const description = String(item.description || '').toLowerCase();
+      if (command.startsWith(needle)) return { item, index, score: 0 };
+      if (command.includes(needle)) return { item, index, score: 1 };
+      if (description.includes(needle)) return { item, index, score: 2 };
+      return null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .map(match => match.item);
+}
+
+function resolveSlashSelection(item) {
+  if (!item) return { action: 'none' };
+  if (item.local) return { action: 'local', command: item.command };
+  if (item.requiresArgument) {
+    return { action: 'fill', text: `${item.command} ` };
+  }
+  return { action: 'send', text: item.command };
+}
+
 function renderChatHtml({ nonce, platform }) {
   const modKey = platform === 'darwin' ? 'Cmd' : 'Ctrl';
 
@@ -528,6 +635,60 @@ function renderChatHtml({ nonce, platform }) {
     }
     .input-area textarea::placeholder { color: var(--oc-text-soft); }
     .input-area textarea:focus { border-color: var(--oc-accent); }
+    .attachments-tray {
+      display: none;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 8px 12px 0;
+      border-top: 1px solid var(--oc-border-soft);
+      background: var(--oc-panel);
+      flex-shrink: 0;
+    }
+    .attachments-tray.visible { display: flex; }
+    .attachment-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .attachment-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 100%;
+      padding: 4px 7px;
+      border: 1px solid var(--oc-border-soft);
+      border-radius: 999px;
+      background: rgba(0,255,65,0.07);
+      color: var(--oc-text);
+      font-size: 11px;
+    }
+    .attachment-chip-name {
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .attachment-chip-meta { color: var(--oc-text-soft); }
+    .attachment-chip-remove {
+      border: 0;
+      background: transparent;
+      color: var(--oc-text-soft);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0 2px;
+    }
+    .attach-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      border: 1px solid var(--oc-border-soft);
+      background: rgba(255,255,255,0.04);
+      color: var(--oc-accent-bright);
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .attach-btn:hover { border-color: var(--oc-accent); background: rgba(0,255,65,0.12); }
+    .attach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .send-btn {
       width: 36px;
       height: 36px;
@@ -544,6 +705,54 @@ function renderChatHtml({ nonce, platform }) {
     }
     .send-btn:hover { background: rgba(0,255,65,0.25); }
     .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+
+    /* ?? Slash command palette ?? */
+    .power-badge {
+      flex-shrink: 0;
+      max-width: 45%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 2px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,255,65,0.28);
+      color: var(--oc-accent-bright);
+      background: rgba(0,255,65,0.08);
+    }
+    .slash-palette {
+      display: none;
+      position: absolute;
+      left: 12px;
+      right: 56px;
+      bottom: 58px;
+      z-index: 80;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid var(--oc-border-soft);
+      border-radius: 12px;
+      background: rgba(5, 12, 7, 0.98);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+      padding: 6px;
+    }
+    .slash-palette.visible { display: block; }
+    .slash-item {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 2px 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .slash-item.selected {
+      background: rgba(0,255,65,0.12);
+      border-color: rgba(0,255,65,0.28);
+    }
+    .slash-command { color: var(--oc-accent-bright); font-weight: 700; font-family: var(--vscode-editor-font-family, Consolas, monospace); }
+    .slash-source { justify-self: end; font-size: 10px; color: var(--oc-text-soft); text-transform: uppercase; }
+    .slash-desc { grid-column: 1 / -1; font-size: 11px; color: var(--oc-text-dim); }
+    .slash-empty { padding: 10px; color: var(--oc-text-soft); font-size: 12px; }
 
     /* ── Session list overlay ── */
     .session-overlay {
@@ -603,28 +812,29 @@ function renderChatHtml({ nonce, platform }) {
 <body>
   <div class="chat-header">
     <div class="brand">Open<span class="brand-accent">Matrix</span></div>
-    <button class="header-btn" id="historyBtn" title="Session history">History</button>
-    <button class="header-btn" id="newChatBtn" title="New chat">+ New</button>
-    <button class="header-btn danger" id="abortBtn" title="Abort generation">Stop</button>
+    <button class="header-btn" id="historyBtn" title="Historico de conversas">Historico</button>
+    <button class="header-btn" id="newChatBtn" title="Nova conversa">+ Nova</button>
+    <button class="header-btn danger" id="abortBtn" title="Parar resposta">Parar</button>
   </div>
   <div class="status-bar">
     <span class="status-dot" id="statusDot"></span>
-    <span class="status-text" id="statusText">Ready</span>
+    <span class="status-text" id="statusText">Pronto</span>
     <span class="status-usage" id="statusUsage"></span>
+    <span class="power-badge" id="powerBadge" title="Modo de poder do chat">Poder total &#183; ferramentas padrao &#183; sem pedir permissoes</span>
   </div>
 
   <div class="messages" id="messages">
     <div class="welcome" id="welcomeScreen">
       <div class="welcome-title">Open<span class="accent">Matrix</span></div>
-      <div class="welcome-sub">Ask a question, request a code change, or start a new task.</div>
-      <div class="welcome-hint">Press <kbd>${escapeHtml(modKey)}+L</kbd> to focus input</div>
+      <div class="welcome-sub">Faca uma pergunta, peca uma alteracao no codigo ou inicie uma nova tarefa.</div>
+      <div class="welcome-hint">Pressione <kbd>${escapeHtml(modKey)}+L</kbd> para focar na mensagem</div>
     </div>
   </div>
 
   <div class="thinking-block" id="thinkingBlock">
     <div class="thinking-header">
       <div class="thinking-spinner"></div>
-      <span id="thinkingLabel">Thinking...</span>
+      <span id="thinkingLabel">Pensando...</span>
     </div>
     <div class="thinking-meta" id="thinkingMeta"></div>
   </div>
@@ -635,20 +845,23 @@ function renderChatHtml({ nonce, platform }) {
     <div class="typing-dot"></div>
   </div>
 
+  <div class="slash-palette" id="slashPalette" role="listbox" aria-label="Comandos de barra do OPEN MATRIX"></div>
+  <div class="attachments-tray" id="attachmentsTray" aria-live="polite"></div>
   <div class="input-area">
-    <textarea id="chatInput" placeholder="Message OpenMatrix..." rows="1"></textarea>
-    <button class="send-btn" id="sendBtn" title="Send message">&#x27A4;</button>
+    <button class="attach-btn" id="attachBtn" title="Anexar arquivos">&#x1F4CE;</button>
+    <textarea id="chatInput" placeholder="Mensagem para o OPEN MATRIX... Use / para comandos. Use o botao de anexo para arquivos." rows="1"></textarea>
+    <button class="send-btn" id="sendBtn" title="Enviar mensagem">&#x27A4;</button>
   </div>
 
-  <!-- Session list overlay -->
+  <!-- Historico de conversas -->
   <div class="session-overlay" id="sessionOverlay">
     <div class="session-overlay-header">
-      <h2>Session History</h2>
-      <button class="header-btn" id="closeSessionsBtn">Close</button>
+      <h2>Historico de conversas</h2>
+      <button class="header-btn" id="closeSessionsBtn">Fechar</button>
     </div>
-    <input class="session-search" id="sessionSearch" type="text" placeholder="Search sessions..." />
+    <input class="session-search" id="sessionSearch" type="text" placeholder="Buscar conversas..." />
     <div class="session-list" id="sessionList">
-      <div class="session-empty">No sessions found</div>
+      <div class="session-empty">Nenhuma conversa encontrada</div>
     </div>
   </div>
 
@@ -660,12 +873,16 @@ function renderChatHtml({ nonce, platform }) {
   const welcomeEl = document.getElementById('welcomeScreen');
   const inputEl = document.getElementById('chatInput');
   const sendBtn = document.getElementById('sendBtn');
+  const attachBtn = document.getElementById('attachBtn');
+  const attachmentsTray = document.getElementById('attachmentsTray');
   const abortBtn = document.getElementById('abortBtn');
   const newChatBtn = document.getElementById('newChatBtn');
   const historyBtn = document.getElementById('historyBtn');
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const statusUsage = document.getElementById('statusUsage');
+  const powerBadge = document.getElementById('powerBadge');
+  const slashPalette = document.getElementById('slashPalette');
   const typingIndicator = document.getElementById('typingIndicator');
   const sessionOverlay = document.getElementById('sessionOverlay');
   const closeSessionsBtn = document.getElementById('closeSessionsBtn');
@@ -675,6 +892,12 @@ function renderChatHtml({ nonce, platform }) {
   let isStreaming = false;
   let currentAssistantEl = null;
   let currentTextEl = null;
+  let dynamicSlashCommands = ${JSON.stringify(DEFAULT_DYNAMIC_SLASH_COMMANDS)};
+  let slashVisible = false;
+  let slashSelectedIndex = 0;
+  let slashVisibleItems = [];
+  let pendingAttachments = [];
+  const favoriteSlashItems = ${JSON.stringify(buildSlashCommandItems([]))};
   const toolResultMap = {};
 
   /* ── Markdown renderer ── */
@@ -689,7 +912,7 @@ function renderChatHtml({ nonce, platform }) {
       const id = 'cb-' + Math.random().toString(36).slice(2, 8);
       return '<div class="code-wrapper"><div class="code-header">' +
         '<span>' + langLabel + '</span>' +
-        '<button class="code-copy-btn" data-copy-id="' + id + '">Copy</button></div>' +
+        '<button class="code-copy-btn" data-copy-id="' + id + '">Copiar</button></div>' +
         '<code class="code-block" id="' + id + '">' + highlighted + '</code></div>';
     });
 
@@ -780,20 +1003,196 @@ function renderChatHtml({ nonce, platform }) {
     isStreaming = val;
     abortBtn.style.display = val ? 'block' : 'none';
     sendBtn.disabled = val;
+    if (attachBtn) attachBtn.disabled = val;
     typingIndicator.classList.toggle('visible', val);
     statusDot.className = 'status-dot ' + (val ? 'streaming' : 'connected');
-    statusText.textContent = label || (val ? 'Generating...' : 'Ready');
+    statusText.textContent = label || (val ? 'Gerando...' : 'Pronto');
   }
 
   function setStatusLabel(label) {
     statusText.textContent = label;
   }
 
-  function appendUserMessage(text) {
+  function setPowerBadge(detail, permissionMode, tools) {
+    if (!powerBadge) return;
+    const mode = permissionMode || 'bypassPermissions';
+    const toolText = Array.isArray(tools) ? 'default' : (tools || 'default');
+    const label = mode === 'bypassPermissions'
+      ? 'Poder total'
+      : mode === 'plan'
+        ? 'Modo plano'
+        : 'Modo seguro';
+    const text = detail || (label + ' \u00b7 tools ' + toolText + ' \u00b7 ' + mode);
+    powerBadge.textContent = text;
+    powerBadge.title = text;
+  }
+
+  function normalizeSlashCommandRuntime(value) {
+    const raw = value && typeof value === 'object'
+      ? (value.command || value.name || value.value || '')
+      : value;
+    const text = String(raw || '').trim();
+    if (!text) return '';
+    return text.startsWith('/') ? text : '/' + text;
+  }
+
+  function getSlashCommandDescription(raw, command) {
+    if (raw && typeof raw === 'object' && raw.description) return String(raw.description);
+    const favorite = favoriteSlashItems.find(item => item.command === command);
+    return favorite ? favorite.description : 'Comando da CLI OPEN MATRIX';
+  }
+
+  function buildSlashItemsRuntime(dynamicCommands) {
+    const seen = new Set();
+    const items = [];
+    for (const favorite of favoriteSlashItems) {
+      items.push(Object.assign({}, favorite, { source: 'favorite' }));
+      seen.add(favorite.command);
+    }
+    for (const raw of dynamicCommands || []) {
+      const command = normalizeSlashCommandRuntime(raw);
+      if (!command || seen.has(command)) continue;
+      items.push({
+        command: command,
+        description: getSlashCommandDescription(raw, command),
+        source: 'cli',
+        requiresArgument: false,
+        argumentHint: '',
+        local: false,
+      });
+      seen.add(command);
+    }
+    return items;
+  }
+
+  function filterSlashItemsRuntime(items, query) {
+    const needle = String(query || '').trim().replace(/^[/]/, '').toLowerCase();
+    if (!needle) return items;
+    return items
+      .map((item, index) => {
+        const command = String(item.command || '').replace(/^[/]/, '').toLowerCase();
+        const description = String(item.description || '').toLowerCase();
+        if (command.startsWith(needle)) return { item, index, score: 0 };
+        if (command.includes(needle)) return { item, index, score: 1 };
+        if (description.includes(needle)) return { item, index, score: 2 };
+        return null;
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.score - right.score || left.index - right.index)
+      .map(match => match.item);
+  }
+
+  function currentSlashQuery() {
+    const text = inputEl.value || '';
+    if (!text.startsWith('/')) return null;
+    if (Array.from(text.slice(1)).some(ch => ch.trim() === '')) return null;
+    return text;
+  }
+
+  function updateSlashPalette() {
+    const query = currentSlashQuery();
+    if (query === null || isStreaming) {
+      hideSlashPalette();
+      return;
+    }
+    const allItems = buildSlashItemsRuntime(dynamicSlashCommands);
+    slashVisibleItems = filterSlashItemsRuntime(allItems, query);
+    if (slashSelectedIndex >= slashVisibleItems.length) slashSelectedIndex = Math.max(slashVisibleItems.length - 1, 0);
+    if (slashSelectedIndex < 0) slashSelectedIndex = 0;
+    slashVisible = true;
+    renderSlashPalette();
+  }
+
+  function renderSlashPalette() {
+    if (!slashPalette) return;
+    if (!slashVisible) {
+      slashPalette.classList.remove('visible');
+      return;
+    }
+    if (!slashVisibleItems.length) {
+      slashPalette.innerHTML = '<div class="slash-empty">Nenhum comando encontrado</div>';
+      slashPalette.classList.add('visible');
+      return;
+    }
+    slashPalette.innerHTML = slashVisibleItems.map((item, index) => {
+      const selected = index === slashSelectedIndex;
+      const hint = item.requiresArgument && item.argumentHint ? ' ' + item.argumentHint : '';
+      return '<div class="slash-item' + (selected ? ' selected' : '') + '" role="option" aria-selected="' + (selected ? 'true' : 'false') + '" data-index="' + index + '">' +
+        '<span class="slash-command">' + escapeForMd(item.command + hint) + '</span>' +
+        '<span class="slash-source">' + escapeForMd(item.source === 'favorite' ? 'favorito' : 'cli') + '</span>' +
+        '<span class="slash-desc">' + escapeForMd(item.description || '') + '</span>' +
+      '</div>';
+    }).join('');
+    slashPalette.classList.add('visible');
+    slashPalette.querySelectorAll('.slash-item').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        chooseSlashItem(Number(el.dataset.index || 0));
+      });
+    });
+    const selectedEl = slashPalette.querySelector('.slash-item.selected');
+    if (selectedEl) selectedEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  function hideSlashPalette() {
+    slashVisible = false;
+    slashVisibleItems = [];
+    slashSelectedIndex = 0;
+    if (slashPalette) {
+      slashPalette.classList.remove('visible');
+      slashPalette.innerHTML = '';
+    }
+  }
+
+  function chooseSlashItem(index) {
+    const item = slashVisibleItems[index];
+    if (!item) return;
+    if (item.local) {
+      vscode.postMessage({ type: 'local_slash_command', command: item.command });
+      inputEl.value = '';
+      autoResizeInput();
+      hideSlashPalette();
+      return;
+    }
+    if (item.requiresArgument) {
+      inputEl.value = item.command + ' ';
+      autoResizeInput();
+      hideSlashPalette();
+      inputEl.focus();
+      inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+      return;
+    }
+    sendText(item.command);
+  }
+
+  function attachmentIcon(att) {
+    if (!att) return '\uD83D\uDCCE';
+    if (att.kind === 'image') return '\uD83D\uDDBC';
+    if (att.kind === 'pdf') return '\uD83D\uDCC4';
+    if (att.kind === 'text') return '\uD83D\uDCDD';
+    return '\uD83D\uDCCE';
+  }
+
+  function appendUserMessage(text, attachments) {
     hideWelcome();
     const el = document.createElement('div');
     el.className = 'msg-user';
-    el.textContent = text;
+    const body = document.createElement('div');
+    body.textContent = text;
+    el.appendChild(body);
+    if (attachments && attachments.length > 0) {
+      const list = document.createElement('div');
+      list.className = 'attachment-list';
+      for (const att of attachments) {
+        const chip = document.createElement('span');
+        chip.className = 'attachment-chip';
+        chip.innerHTML = '<span>' + attachmentIcon(att) + '</span>' +
+          '<span class="attachment-chip-name">' + escapeForMd(att.name || att.path || 'arquivo') + '</span>' +
+          '<span class="attachment-chip-meta">' + escapeForMd(att.sizeLabel || '') + '</span>';
+        list.appendChild(chip);
+      }
+      el.appendChild(list);
+    }
     messagesEl.appendChild(el);
     scrollToBottom();
   }
@@ -834,8 +1233,8 @@ function renderChatHtml({ nonce, platform }) {
     card.className = 'tool-card expanded';
     card.dataset.toolId = toolUse.id || '';
     const statusClass = toolUse.status || 'running';
-    const statusLabel = statusClass === 'running' ? 'Running...'
-      : statusClass === 'error' ? 'Error' : 'Done';
+    const statusLabel = statusClass === 'running' ? 'Executando...'
+      : statusClass === 'error' ? 'Erro' : 'Concluido';
 
     var inputSummary = '';
     if (toolUse.input && typeof toolUse.input === 'object') {
@@ -852,8 +1251,8 @@ function renderChatHtml({ nonce, platform }) {
     if (toolUse.input && typeof toolUse.input === 'object') {
       if (toolUse.input.new_string || toolUse.input.content) {
         var content = toolUse.input.new_string || toolUse.input.content || '';
-        if (content.length > 500) content = content.slice(0, 500) + '... (truncated)';
-        inputDetail = '<div class="tool-input-label">Changes</div>' +
+        if (content.length > 500) content = content.slice(0, 500) + '... (cortado)';
+        inputDetail = '<div class="tool-input-label">Alteracoes</div>' +
           '<div class="tool-input-content">' + escapeForMd(content) + '</div>';
       }
       if (toolUse.input.old_string && toolUse.input.new_string) {
@@ -861,25 +1260,25 @@ function renderChatHtml({ nonce, platform }) {
         var newStr = toolUse.input.new_string;
         if (oldStr.length > 300) oldStr = oldStr.slice(0, 300) + '...';
         if (newStr.length > 300) newStr = newStr.slice(0, 300) + '...';
-        inputDetail = '<div class="tool-input-label">Replace</div>' +
+        inputDetail = '<div class="tool-input-label">Substituir</div>' +
           '<div class="tool-input-content tool-diff-old">' + escapeForMd(oldStr) + '</div>' +
-          '<div class="tool-input-label">With</div>' +
+          '<div class="tool-input-label">Por</div>' +
           '<div class="tool-input-content tool-diff-new">' + escapeForMd(newStr) + '</div>';
       }
     }
 
     var isFileTool = inputSummary && !toolUse.input?.command;
     var fileLink = isFileTool
-      ? '<a class="file-link" data-filepath="' + escapeForMd(inputSummary) + '" title="Open in editor">' + escapeForMd(inputSummary.split(/[\\/]/).pop() || inputSummary) + '</a>'
+      ? '<a class="file-link" data-filepath="' + escapeForMd(inputSummary) + '" title="Abrir no editor">' + escapeForMd(inputSummary.split(/[\\/]/).pop() || inputSummary) + '</a>'
       : (inputSummary ? escapeForMd(inputSummary.split(/[\\/]/).pop() || inputSummary) : '');
     var pathDisplay = isFileTool
-      ? '<div class="tool-input-label">Path</div><div class="tool-input-content"><a class="file-link" data-filepath="' + escapeForMd(inputSummary) + '" title="Open in editor">' + escapeForMd(inputSummary) + '</a></div>'
-      : (inputSummary ? '<div class="tool-input-label">' + (toolUse.input?.command ? 'Command' : 'Path') + '</div><div class="tool-input-content">' + escapeForMd(inputSummary) + '</div>' : '');
+      ? '<div class="tool-input-label">Caminho</div><div class="tool-input-content"><a class="file-link" data-filepath="' + escapeForMd(inputSummary) + '" title="Abrir no editor">' + escapeForMd(inputSummary) + '</a></div>'
+      : (inputSummary ? '<div class="tool-input-label">' + (toolUse.input?.command ? 'Comando' : 'Caminho') + '</div><div class="tool-input-content">' + escapeForMd(inputSummary) + '</div>' : '');
 
     card.innerHTML =
       '<div class="tool-header">' +
         '<span class="tool-icon">' + (toolUse.icon || '') + '</span>' +
-        '<span class="tool-name">' + escapeForMd(toolUse.displayName || toolUse.name || 'Tool') +
+        '<span class="tool-name">' + escapeForMd(toolUse.displayName || toolUse.name || 'Ferramenta') +
           (fileLink ? ' <span class="tool-path">' + fileLink + '</span>' : '') +
         '</span>' +
         '<span class="tool-status ' + statusClass + '">' + statusLabel + '</span>' +
@@ -888,8 +1287,8 @@ function renderChatHtml({ nonce, platform }) {
       '<div class="tool-body">' +
         pathDisplay +
         inputDetail +
-        '<div class="tool-output-label">Output</div>' +
-        '<div class="tool-output-content" data-tool-output="' + (toolUse.id || '') + '">Running...</div>' +
+        '<div class="tool-output-label">Saida</div>' +
+        '<div class="tool-output-content" data-tool-output="' + (toolUse.id || '') + '">Executando...</div>' +
       '</div>';
     card.querySelector('.tool-header').addEventListener('click', () => {
       card.classList.toggle('expanded');
@@ -902,7 +1301,7 @@ function renderChatHtml({ nonce, platform }) {
   function updateToolResult(toolUseId, content, isError) {
     const outputEl = document.querySelector('[data-tool-output="' + toolUseId + '"]');
     if (outputEl) {
-      outputEl.textContent = content || '(done)';
+      outputEl.textContent = content || '(concluido)';
       if (isError) outputEl.classList.add('error');
     }
     const card = document.querySelector('[data-tool-id="' + toolUseId + '"]');
@@ -910,14 +1309,14 @@ function renderChatHtml({ nonce, platform }) {
       const statusEl = card.querySelector('.tool-status');
       if (statusEl) {
         statusEl.className = 'tool-status ' + (isError ? 'error' : 'complete');
-        statusEl.textContent = isError ? 'Error' : 'Done';
+        statusEl.textContent = isError ? 'Erro' : 'Concluido';
       }
     }
   }
 
   function updateToolProgress(toolUseId, content) {
     const outputEl = document.querySelector('[data-tool-output="' + toolUseId + '"]');
-    if (outputEl && (outputEl.textContent === 'Waiting...' || outputEl.textContent === 'Running...')) {
+    if (outputEl && (outputEl.textContent === 'Aguardando...' || outputEl.textContent === 'Executando...')) {
       outputEl.textContent = content || '';
     }
   }
@@ -936,7 +1335,7 @@ function renderChatHtml({ nonce, platform }) {
       const fp = input.file_path || input.path;
       const shortName = fp.split(/[\\/]/).pop() || fp;
       if (!nameEl.querySelector('.tool-path')) {
-        nameEl.insertAdjacentHTML('beforeend', ' <span class="tool-path"><a class="file-link" data-filepath="' + escapeForMd(fp) + '" title="Open in editor">' + escapeForMd(shortName) + '</a></span>');
+        nameEl.insertAdjacentHTML('beforeend', ' <span class="tool-path"><a class="file-link" data-filepath="' + escapeForMd(fp) + '" title="Abrir no editor">' + escapeForMd(shortName) + '</a></span>');
       }
     }
 
@@ -944,11 +1343,11 @@ function renderChatHtml({ nonce, platform }) {
     var pathHtml = '';
     if (input.file_path || input.path) {
       var fp = input.file_path || input.path;
-      pathHtml = '<div class="tool-input-label">Path</div><div class="tool-input-content">' +
-        '<a class="file-link" data-filepath="' + escapeForMd(fp) + '" title="Open in editor">' + escapeForMd(fp) + '</a></div>';
+      pathHtml = '<div class="tool-input-label">Caminho</div><div class="tool-input-content">' +
+        '<a class="file-link" data-filepath="' + escapeForMd(fp) + '" title="Abrir no editor">' + escapeForMd(fp) + '</a></div>';
     }
     if (input.command) {
-      pathHtml = '<div class="tool-input-label">Command</div><div class="tool-input-content">' +
+      pathHtml = '<div class="tool-input-label">Comando</div><div class="tool-input-content">' +
         escapeForMd(input.command) + '</div>';
     }
 
@@ -957,23 +1356,23 @@ function renderChatHtml({ nonce, platform }) {
     if (input.old_string && input.new_string) {
       var oldStr = input.old_string;
       var newStr = input.new_string;
-      if (oldStr.length > 500) oldStr = oldStr.slice(0, 500) + '... (truncated)';
-      if (newStr.length > 500) newStr = newStr.slice(0, 500) + '... (truncated)';
-      diffHtml = '<div class="tool-input-label">Replace</div>' +
+      if (oldStr.length > 500) oldStr = oldStr.slice(0, 500) + '... (cortado)';
+      if (newStr.length > 500) newStr = newStr.slice(0, 500) + '... (cortado)';
+      diffHtml = '<div class="tool-input-label">Substituir</div>' +
         '<div class="tool-input-content tool-diff-old">' + escapeForMd(oldStr) + '</div>' +
-        '<div class="tool-input-label">With</div>' +
+        '<div class="tool-input-label">Por</div>' +
         '<div class="tool-input-content tool-diff-new">' + escapeForMd(newStr) + '</div>';
     } else if (input.content || input.new_string) {
       var content = input.content || input.new_string || '';
-      if (content.length > 800) content = content.slice(0, 800) + '... (truncated)';
-      diffHtml = '<div class="tool-input-label">Content</div>' +
+      if (content.length > 800) content = content.slice(0, 800) + '... (cortado)';
+      diffHtml = '<div class="tool-input-label">Conteudo</div>' +
         '<div class="tool-input-content tool-diff-new">' + escapeForMd(content) + '</div>';
     }
 
     // Keep the output element
     const outputEl = body.querySelector('[data-tool-output]');
     const outputHtml = outputEl ? outputEl.outerHTML : '';
-    const outputLabel = '<div class="tool-output-label">Output</div>';
+    const outputLabel = '<div class="tool-output-label">Saida</div>';
 
     body.innerHTML = pathHtml + diffHtml + outputLabel + outputHtml;
     card.classList.add('expanded');
@@ -986,13 +1385,13 @@ function renderChatHtml({ nonce, platform }) {
     el.className = 'perm-card';
     el.dataset.requestId = perm.requestId || '';
     el.innerHTML =
-      '<div class="perm-title">Permission Required: ' + escapeForMd(perm.displayName || perm.toolName || 'Tool') + '</div>' +
+      '<div class="perm-title">Permissao necessaria: ' + escapeForMd(perm.displayName || perm.toolName || 'Ferramenta') + '</div>' +
       (perm.description ? '<div class="perm-desc">' + escapeForMd(perm.description) + '</div>' : '') +
       (perm.inputPreview ? '<div class="perm-input">' + escapeForMd(perm.inputPreview) + '</div>' : '') +
       '<div class="perm-actions">' +
-        '<button class="perm-btn allow" data-action="allow">Allow</button>' +
-        '<button class="perm-btn deny" data-action="deny">Deny</button>' +
-        '<button class="perm-btn allow-session" data-action="allow-session">Allow for session</button>' +
+        '<button class="perm-btn allow" data-action="allow">Permitir</button>' +
+        '<button class="perm-btn deny" data-action="deny">Negar</button>' +
+        '<button class="perm-btn allow-session" data-action="allow-session">Permitir na sessao</button>' +
       '</div>';
     el.querySelectorAll('.perm-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1019,6 +1418,13 @@ function renderChatHtml({ nonce, platform }) {
     scrollToBottom();
   }
 
+  function maybeAppendToolFailureHint(text) {
+    const content = String(text || '');
+    if (!/Stopped: repeated tool failures detected/i.test(content)) return;
+    if (!/Bash failed 3 times/i.test(content) && !/Tool calls failed 3 times/i.test(content)) return;
+    appendStatusMessage('Dica Windows: a CLI parou para evitar loop. Normalmente e caminho errado, comando Bash incompativel no Windows, ou comando repetido sem checar erro. Peca: confira diretorio atual, liste arquivos, use caminho absoluto e so depois tente outro comando.');
+  }
+
   function appendRateLimitMessage(text) {
     const el = document.createElement('div');
     el.className = 'msg-rate-limit';
@@ -1034,9 +1440,9 @@ function renderChatHtml({ nonce, platform }) {
 
   function showThinkingBlock() {
     thinkingBlock.classList.add('visible');
-    thinkingLabel.textContent = 'Thinking...';
+    thinkingLabel.textContent = 'Pensando...';
     thinkingMeta.textContent = '';
-    setStatusLabel('Thinking...');
+    setStatusLabel('Pensando...');
     scrollToBottom();
   }
 
@@ -1044,20 +1450,20 @@ function renderChatHtml({ nonce, platform }) {
     const elapsedStr = elapsed >= 60
       ? Math.floor(elapsed / 60) + 'm ' + (elapsed % 60) + 's'
       : elapsed + 's';
-    thinkingLabel.textContent = 'Thinking...';
+    thinkingLabel.textContent = 'Pensando...';
     thinkingMeta.textContent = elapsedStr + ' · ~' + tokens + ' tokens';
-    setStatusLabel('Thinking... (' + elapsedStr + ')');
+    setStatusLabel('Pensando... (' + elapsedStr + ')');
   }
 
   function hideThinkingBlock() {
     thinkingBlock.classList.remove('visible');
-    setStatusLabel('Generating...');
+    setStatusLabel('Gerando...');
   }
 
   /* ── Session list ── */
   function renderSessionList(sessions) {
     if (!sessions || sessions.length === 0) {
-      sessionList.innerHTML = '<div class="session-empty">No sessions found</div>';
+      sessionList.innerHTML = '<div class="session-empty">Nenhuma conversa encontrada</div>';
       return;
     }
     const groups = groupByDate(sessions);
@@ -1066,7 +1472,7 @@ function renderChatHtml({ nonce, platform }) {
       html += '<div class="session-group-label">' + escapeForMd(label) + '</div>';
       for (const s of items) {
         html += '<div class="session-item" data-session-id="' + (s.id || '') + '">' +
-          '<div class="session-item-title">' + escapeForMd(s.title || s.id || 'Untitled') + '</div>' +
+          '<div class="session-item-title">' + escapeForMd(s.title || s.id || 'Sem titulo') + '</div>' +
           '<div class="session-item-preview">' + escapeForMd(s.preview || '') + '</div>' +
           '<div class="session-item-time">' + escapeForMd(s.timeLabel || '') + '</div>' +
         '</div>';
@@ -1090,25 +1496,128 @@ function renderChatHtml({ nonce, platform }) {
     for (const s of sessions) {
       const t = s.timestamp || 0;
       let label;
-      if (t >= today) label = 'Today';
-      else if (t >= yesterday) label = 'Yesterday';
-      else if (t >= weekAgo) label = 'This Week';
-      else label = 'Older';
+      if (t >= today) label = 'Hoje';
+      else if (t >= yesterday) label = 'Ontem';
+      else if (t >= weekAgo) label = 'Esta semana';
+      else label = 'Mais antigas';
       if (!groups.has(label)) groups.set(label, []);
       groups.get(label).push(s);
     }
     return groups;
   }
 
+  function renderPendingAttachments() {
+    if (!attachmentsTray) return;
+    if (!pendingAttachments.length) {
+      attachmentsTray.classList.remove('visible');
+      attachmentsTray.innerHTML = '';
+      return;
+    }
+    attachmentsTray.classList.add('visible');
+    attachmentsTray.innerHTML = pendingAttachments.map((att, index) => {
+      return '<span class="attachment-chip" title="' + escapeForMd(att.path || '') + '">' +
+        '<span>' + attachmentIcon(att) + '</span>' +
+        '<span class="attachment-chip-name">' + escapeForMd(att.name || att.path || 'arquivo') + '</span>' +
+        '<span class="attachment-chip-meta">' + escapeForMd(att.sizeLabel || '') + '</span>' +
+        '<button class="attachment-chip-remove" data-index="' + index + '" title="Remover anexo">&times;</button>' +
+      '</span>';
+    }).join('');
+    attachmentsTray.querySelectorAll('.attachment-chip-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        pendingAttachments.splice(Number(btn.dataset.index || 0), 1);
+        renderPendingAttachments();
+        inputEl.focus();
+      });
+    });
+  }
+
+  function addPendingAttachments(items) {
+    const byPath = new Map(pendingAttachments.map(att => [att.path, att]));
+    for (const att of items || []) {
+      if (att && att.path && !byPath.has(att.path)) {
+        byPath.set(att.path, att);
+      }
+    }
+    pendingAttachments = Array.from(byPath.values());
+    renderPendingAttachments();
+    inputEl.focus();
+  }
+
+  function fileToClipboardPayload(file, index) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const comma = result.indexOf(',');
+        resolve({
+          name: file.name || ('clipboard-' + Date.now() + '-' + index + '.png'),
+          mimeType: file.type || 'image/png',
+          size: file.size || 0,
+          dataBase64: comma >= 0 ? result.slice(comma + 1) : result,
+        });
+      };
+      reader.onerror = () => reject(reader.error || new Error('Falha ao ler imagem colada'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handlePaste(event) {
+    const clipboard = event.clipboardData;
+    if (!clipboard || isStreaming) return;
+    const files = [];
+    if (clipboard.items && clipboard.items.length) {
+      for (const item of clipboard.items) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file && String(file.type || '').startsWith('image/')) files.push(file);
+        }
+      }
+    }
+    if (files.length === 0 && clipboard.files && clipboard.files.length) {
+      for (const file of clipboard.files) {
+        if (file && String(file.type || '').startsWith('image/')) files.push(file);
+      }
+    }
+    if (files.length === 0) return;
+    event.preventDefault();
+    setStatusLabel('Colando imagem...');
+    try {
+      const payload = await Promise.all(files.map(fileToClipboardPayload));
+      vscode.postMessage({ type: 'paste_files', files: payload });
+    } catch (err) {
+      appendStatusMessage('Anexo: ' + (err && err.message ? err.message : String(err)));
+      setStatusLabel('Falha ao colar imagem');
+    }
+  }
+
   /* ── Input handling ── */
-  function sendMessage() {
-    const text = inputEl.value.trim();
-    if (!text || isStreaming) return;
-    appendUserMessage(text);
-    vscode.postMessage({ type: 'send_message', text });
+  function sendText(text) {
+    const trimmed = String(text || '').trim();
+    const attachments = pendingAttachments.slice();
+    if ((!trimmed && attachments.length === 0) || isStreaming) return;
+    const displayText = trimmed || 'Analise os arquivos anexados.';
+    appendUserMessage(displayText, attachments);
+    vscode.postMessage({ type: 'send_message', text: trimmed, attachments });
+    pendingAttachments = [];
+    renderPendingAttachments();
     inputEl.value = '';
     autoResizeInput();
+    hideSlashPalette();
     setStreaming(true);
+  }
+
+  function sendMessage() {
+    const text = inputEl.value.trim();
+    if ((!text && pendingAttachments.length === 0) || isStreaming) return;
+    const localCommand = text.toLowerCase();
+    if (localCommand === '/full' || localCommand === '/safe' || localCommand === '/plan') {
+      vscode.postMessage({ type: 'local_slash_command', command: localCommand });
+      inputEl.value = '';
+      autoResizeInput();
+      hideSlashPalette();
+      return;
+    }
+    sendText(text);
   }
 
   function autoResizeInput() {
@@ -1116,14 +1625,45 @@ function renderChatHtml({ nonce, platform }) {
     inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
   }
 
-  inputEl.addEventListener('input', autoResizeInput);
+  inputEl.addEventListener('input', () => {
+    autoResizeInput();
+    updateSlashPalette();
+  });
   inputEl.addEventListener('keydown', (e) => {
+    if (slashVisible) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        slashSelectedIndex = Math.min(slashSelectedIndex + 1, Math.max(slashVisibleItems.length - 1, 0));
+        renderSlashPalette();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        slashSelectedIndex = Math.max(slashSelectedIndex - 1, 0);
+        renderSlashPalette();
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        hideSlashPalette();
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey && slashVisibleItems.length > 0) {
+        e.preventDefault();
+        chooseSlashItem(slashSelectedIndex);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   });
   sendBtn.addEventListener('click', sendMessage);
+  if (attachBtn) {
+    attachBtn.addEventListener('click', () => vscode.postMessage({ type: 'pick_files' }));
+  }
+  document.addEventListener('paste', handlePaste);
   abortBtn.addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
   newChatBtn.addEventListener('click', () => vscode.postMessage({ type: 'new_session' }));
   historyBtn.addEventListener('click', () => {
@@ -1151,8 +1691,8 @@ function renderChatHtml({ nonce, platform }) {
       if (codeEl) {
         const text = codeEl.textContent;
         vscode.postMessage({ type: 'copy_code', text });
-        copyBtn.textContent = 'Copied!';
-        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+        copyBtn.textContent = 'Copiado!';
+        setTimeout(() => { copyBtn.textContent = 'Copiar'; }, 1500);
       }
       return;
     }
@@ -1176,12 +1716,12 @@ function renderChatHtml({ nonce, platform }) {
 
     switch (msg.type) {
       case 'stream_start':
-        setStreaming(true, 'Generating...');
+        setStreaming(true, 'Gerando...');
         getOrCreateAssistantEl();
         break;
 
       case 'stream_delta': {
-        setStatusLabel('Generating...');
+        setStatusLabel('Gerando...');
         const { textEl } = getOrCreateAssistantEl();
         textEl.innerHTML = renderMarkdown(msg.text || '');
         scrollToBottom();
@@ -1196,17 +1736,18 @@ function renderChatHtml({ nonce, platform }) {
         finalizeAssistant();
         if (msg.usage) {
           const u = msg.usage;
-          statusUsage.textContent = (u.input_tokens || 0) + ' in / ' + (u.output_tokens || 0) + ' out';
+          statusUsage.textContent = (u.input_tokens || 0) + ' entrada / ' + (u.output_tokens || 0) + ' saida';
         }
         if (msg.final) {
           setStreaming(false);
+          maybeAppendToolFailureHint(msg.text || '');
         }
         scrollToBottom();
         break;
 
       case 'tool_use':
         appendToolCard(msg.toolUse);
-        setStatusLabel('Running: ' + (msg.toolUse.displayName || msg.toolUse.name || 'tool') + '...');
+        setStatusLabel('Executando: ' + (msg.toolUse.displayName || msg.toolUse.name || 'tool') + '...');
         break;
 
       case 'tool_result':
@@ -1226,11 +1767,21 @@ function renderChatHtml({ nonce, platform }) {
         break;
 
       case 'status':
-        setStatusLabel(msg.content || 'Working...');
+        setStatusLabel(msg.content || 'Trabalhando...');
         break;
 
       case 'rate_limit':
-        appendRateLimitMessage(msg.message || 'Rate limited');
+        appendRateLimitMessage(msg.message || 'Limite de taxa atingido');
+        break;
+
+      case 'attachments_picked':
+        addPendingAttachments(msg.attachments || []);
+        setStatusLabel((msg.attachments || []).length + ' arquivo(s) anexado(s)');
+        break;
+
+      case 'attachments_error':
+        appendStatusMessage('Anexo: ' + (msg.message || 'falha ao carregar arquivo'));
+        setStatusLabel('Falha ao anexar arquivo');
         break;
 
       case 'thinking_start':
@@ -1246,16 +1797,25 @@ function renderChatHtml({ nonce, platform }) {
         break;
 
       case 'system_info':
-        if (msg.model) {
-          statusUsage.textContent = msg.model;
+        // Modelo oculto por padrao para manter a UI limpa.
+        if (Array.isArray(msg.slashCommands)) {
+          dynamicSlashCommands = msg.slashCommands;
+          updateSlashPalette();
         }
+        setPowerBadge(null, msg.permissionMode, 'default');
+        break;
+
+      case 'power_state':
+        setPowerBadge(msg.detail, msg.permissionMode, msg.tools);
         break;
 
       case 'error':
         setStreaming(false);
         finalizeAssistant();
         statusDot.className = 'status-dot error';
-        statusText.textContent = 'Error: ' + (msg.message || 'Unknown error');
+        statusText.textContent = 'Erro: ' + (msg.message || 'Erro desconhecido');
+        appendStatusMessage('Erro: ' + (msg.message || 'Erro desconhecido'));
+        maybeAppendToolFailureHint(msg.message || '');
         break;
 
       case 'session_list':
@@ -1272,21 +1832,25 @@ function renderChatHtml({ nonce, platform }) {
         currentTextEl = null;
         statusUsage.textContent = '';
         statusDot.className = 'status-dot connected';
-        statusText.textContent = 'Ready';
+        statusText.textContent = 'Pronto';
+        hideSlashPalette();
         break;
 
       case 'restore_messages':
+        messagesEl.innerHTML = '';
+        currentAssistantEl = null;
+        currentTextEl = null;
         hideWelcome();
         if (msg.messages) {
           for (const m of msg.messages) {
             if (m.role === 'user') {
-              appendUserMessage(m.text || '');
+              appendUserMessage(m.text || '', m.attachments || []);
             } else if (m.role === 'assistant') {
               const { textEl } = getOrCreateAssistantEl();
               textEl.innerHTML = renderMarkdown(m.text || '');
               if (m.toolUses && m.toolUses.length > 0) {
                 for (const tu of m.toolUses) {
-                  var displayName = tu.name || 'Tool';
+                  var displayName = tu.name || 'Ferramenta';
                   var icon = '';
                   var inputPreview = '';
                   if (tu.input && typeof tu.input === 'object') {
@@ -1307,7 +1871,7 @@ function renderChatHtml({ nonce, platform }) {
                   if (tu.result !== undefined && tu.result !== null) {
                     updateToolResult(String(tu.id), tu.result, tu.isError || false);
                   } else {
-                    updateToolResult(String(tu.id), '(done)', false);
+                    updateToolResult(String(tu.id), '(concluido)', false);
                   }
                 }
               }
@@ -1321,7 +1885,7 @@ function renderChatHtml({ nonce, platform }) {
       case 'connected':
         setStreaming(false);
         statusDot.className = 'status-dot connected';
-        statusText.textContent = msg.message || 'Connected';
+        statusText.textContent = msg.message === 'Connected' ? 'Conectado' : (msg.message === 'Ready' ? 'Pronto' : (msg.message || 'Conectado'));
         break;
 
       default:
@@ -1351,4 +1915,11 @@ function renderChatHtml({ nonce, platform }) {
 </html>`;
 }
 
-module.exports = { renderChatHtml };
+module.exports = {
+  renderChatHtml,
+  FAVORITE_SLASH_COMMANDS,
+  buildSlashCommandItems,
+  filterSlashCommandItems,
+  resolveSlashSelection,
+  DEFAULT_DYNAMIC_SLASH_COMMANDS,
+};

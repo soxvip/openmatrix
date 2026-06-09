@@ -1377,19 +1377,13 @@ export function ProviderWizard({
           subtitle="Step 1 of 3"
           description={
             process.env.OPENAI_API_KEY
-              ? `Enter an API key, or leave this blank to reuse the current ${openAIMetadata.credentialEnvVars[0] ?? 'OPENAI_API_KEY'} from this session.`
-              : `Enter the API key for ${openAIMetadata.name}.`
+              ? `Enter an API key, leave blank to reuse the current ${openAIMetadata.credentialEnvVars[0] ?? 'OPENAI_API_KEY'} from this session, or leave blank for a custom gateway that does not require one.`
+              : `Enter an API key, or leave blank for a custom gateway that does not require one.`
           }
           initialValue=""
           placeholder="sk-..."
           mask="*"
-          allowEmpty={Boolean(process.env.OPENAI_API_KEY)}
-          validate={value => {
-            const candidate = value.trim() || process.env.OPENAI_API_KEY || ''
-            return sanitizeApiKey(candidate)
-              ? null
-              : 'Enter a real API key. Placeholder values like SUA_CHAVE are not valid.'
-          }}
+          allowEmpty
           onSubmit={value => {
             const apiKey = value.trim() || process.env.OPENAI_API_KEY || ''
             setStep({
