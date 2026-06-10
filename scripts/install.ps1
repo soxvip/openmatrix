@@ -250,5 +250,6 @@ if ($env:OPEN_MATRIX_SKIP_VSCODE -eq '1') {
 }
 
 Write-Host 'OPEN MATRIX instalado e configurado.' -ForegroundColor Green
-Write-Host 'Use: open-matrix'
+Write-Host 'Abrindo OPEN MATRIX...'
+& $openMatrixCommand.Source
 
