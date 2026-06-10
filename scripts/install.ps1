@@ -283,9 +283,13 @@ if ([string]::IsNullOrWhiteSpace($token)) {
 }
 
 Write-Host 'Configurando provider OPEN MATRIX...'
-$token | & $openMatrixCommand.Source setup --token-stdin
-if ($LASTEXITCODE -ne 0) {
-  Fail 'Falha ao configurar provider OPEN MATRIX.'
+$setupOutput = $token | & $openMatrixCommand.Source setup --token-stdin 2>&1
+$setupExitCode = $LASTEXITCODE
+if ($setupExitCode -ne 0) {
+  if ($setupOutput) {
+    Write-Host ($setupOutput -join [Environment]::NewLine)
+  }
+  Fail "Falha ao configurar provider OPEN MATRIX. Codigo: $setupExitCode"
 }
 
 if ($env:OPEN_MATRIX_SKIP_VSCODE -eq '1') {
