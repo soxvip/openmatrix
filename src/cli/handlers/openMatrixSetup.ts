@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline'
+import { getGlobalDispatcher } from 'undici'
 
 import { DGSIS_API_KEY_ENV_VAR } from '../../integrations/dgsisModels.js'
 import {
@@ -79,6 +80,7 @@ export async function openMatrixSetupHandler(options: OpenMatrixSetupOptions = {
       assignedModels: entitlements.models,
       ...summary,
     })}\n`)
+    await getGlobalDispatcher().close()
     return
   }
 
@@ -95,4 +97,6 @@ export async function openMatrixSetupHandler(options: OpenMatrixSetupOptions = {
       'Use: open-matrix',
     ].filter(Boolean).join('\n') + '\n',
   )
+
+  await getGlobalDispatcher().close()
 }
