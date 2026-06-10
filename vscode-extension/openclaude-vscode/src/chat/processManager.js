@@ -62,6 +62,60 @@ function quoteCmdArg(value) {
   return '"' + str.replace(/"/g, '\\"') + '"';
 }
 
+// On Windows the npm global `open-matrix` is a `.cmd` shim whose first line
+// invokes a bare `node`. If the spawned cmd.exe cannot see node on PATH it dies
+// with `'"node"' is not recognized` — and patching PATH is fragile because the
+// extension host's env is unpredictable. The robust fix is to bypass the shim:
+// resolve node.exe and the CLI's real JS entry point and invoke them directly,
+// so neither PATH nor the shim matters. Returns { node, entry } or null.
+function resolveDirectInvocation(command) {
+  if (process.platform !== 'win32') return null;
+  const fs = require('fs');
+  const path = require('path');
+
+  // Find node.exe absolutely (reuse resolveNodeDir's discovery, but we need the
+  // dir even when node is already on PATH, so probe candidates directly too).
+  const nodeCandidates = [];
+  const nodeDir = resolveNodeDir();
+  if (nodeDir) nodeCandidates.push(nodeDir);
+  try {
+    for (const dir of String(process.env.Path || process.env.PATH || '').split(';')) {
+      if (dir) nodeCandidates.push(dir);
+    }
+  } catch { /* ignore */ }
+  const sysDrive = process.env.SystemDrive || 'C:';
+  nodeCandidates.push(path.join(sysDrive, '\\', 'Program Files', 'nodejs'));
+  if (process.env.ProgramFiles) nodeCandidates.push(path.join(process.env.ProgramFiles, 'nodejs'));
+
+  let nodeExe = null;
+  for (const dir of nodeCandidates) {
+    try {
+      const p = path.join(dir, 'node.exe');
+      if (fs.existsSync(p)) { nodeExe = p; break; }
+    } catch { /* ignore */ }
+  }
+  if (!nodeExe) return null;
+
+  // Locate the shim and its bundled JS entry. The shim lives in the npm global
+  // bin dir; the entry is at node_modules/@gitlawb/openclaude/bin/open-matrix.
+  const shimDirs = [];
+  if (process.env.APPDATA) shimDirs.push(path.join(process.env.APPDATA, 'npm'));
+  // command may be an absolute path to the shim already.
+  try {
+    if (command && (command.endsWith('.cmd') || command.includes('\\') || command.includes('/'))) {
+      shimDirs.unshift(path.dirname(command));
+    }
+  } catch { /* ignore */ }
+
+  for (const dir of shimDirs) {
+    try {
+      const entry = path.join(dir, 'node_modules', '@gitlawb', 'openclaude', 'bin', 'open-matrix');
+      if (fs.existsSync(entry)) return { node: nodeExe, entry };
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
 function withPdfToolPath(env) {
   if (process.platform !== 'win32') return env;
   if (env.OPEN_MATRIX_POPPLER_PATH) return env;
@@ -107,6 +161,9 @@ function resolveNodeDir() {
 
   const candidates = [];
   if (isWin) {
+    // process.execPath is Code.exe under the extension host, but VS Code bundles
+    // a node next to it on some installs — cheap to check.
+    try { candidates.push(path.dirname(process.execPath)); } catch { /* ignore */ }
     if (process.env.ProgramFiles) candidates.push(path.join(process.env.ProgramFiles, 'nodejs'));
     if (process.env['ProgramFiles(x86)']) candidates.push(path.join(process.env['ProgramFiles(x86)'], 'nodejs'));
     if (process.env.APPDATA) candidates.push(path.join(process.env.APPDATA, 'npm'));
@@ -114,6 +171,12 @@ function resolveNodeDir() {
       candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs'));
       candidates.push(path.join(process.env.LOCALAPPDATA, 'fnm_multishells'));
     }
+    // Hardcoded fallbacks: the extension host sometimes runs with ProgramFiles
+    // unset (observed on Windows 11), which would otherwise skip the standard
+    // install dir and let the npm shim die with '"node"' is not recognized.
+    const sysDrive = process.env.SystemDrive || 'C:';
+    candidates.push(path.join(sysDrive, '\\', 'Program Files', 'nodejs'));
+    candidates.push(path.join(sysDrive, '\\', 'Program Files (x86)', 'nodejs'));
   } else {
     candidates.push('/usr/local/bin', '/usr/bin', '/opt/homebrew/bin');
     if (process.env.HOME) {
@@ -133,14 +196,35 @@ function resolveNodeDir() {
 }
 
 function withNodeOnPath(env) {
-  const nodeDir = resolveNodeDir();
-  if (!nodeDir) return env;
-  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || (process.platform === 'win32' ? 'Path' : 'PATH');
   const sep = process.platform === 'win32' ? ';' : ':';
-  const currentPath = env[pathKey] || '';
-  const entries = currentPath.split(sep).map((e) => e.toLowerCase());
-  if (entries.includes(nodeDir.toLowerCase())) return env;
-  return { ...env, [pathKey]: currentPath ? `${nodeDir}${sep}${currentPath}` : nodeDir };
+  // Collapse every case-variant PATH key (Windows env merges can leave both
+  // 'Path' and 'PATH', and the spawned cmd.exe may inherit whichever one lacks
+  // the nodejs dir, producing '"node"' is not recognized). Merge them into a
+  // single canonical key so node is guaranteed to be reachable.
+  const pathKeys = Object.keys(env).filter((key) => key.toLowerCase() === 'path');
+  const canonicalKey = process.platform === 'win32' ? 'Path' : 'PATH';
+  const next = { ...env };
+  let combined = '';
+  if (pathKeys.length > 0) {
+    const seen = new Set();
+    const parts = [];
+    for (const key of pathKeys) {
+      for (const part of String(env[key] || '').split(sep)) {
+        const norm = part.toLowerCase();
+        if (part && !seen.has(norm)) { seen.add(norm); parts.push(part); }
+      }
+      if (key !== canonicalKey) delete next[key];
+    }
+    combined = parts.join(sep);
+  }
+
+  const nodeDir = resolveNodeDir();
+  if (nodeDir && !combined.split(sep).map((e) => e.toLowerCase()).includes(nodeDir.toLowerCase())) {
+    combined = combined ? `${nodeDir}${sep}${combined}` : nodeDir;
+  }
+
+  if (combined) next[canonicalKey] = combined;
+  return next;
 }
 
 class ProcessManager {
@@ -205,17 +289,30 @@ class ProcessManager {
     const isWin = process.platform === 'win32';
 
     if (isWin) {
-      // On Windows, npm global installs create .cmd shims that spawn()
-      // cannot find without a shell.  Build one command string so the
-      // deprecation warning about unsanitised args does not fire.
-      const cmdLine = [this._command, ...args].map(quoteCmdArg).join(' ');
-      this._process = spawn(cmdLine, [], {
-        cwd: this._cwd,
-        env: spawnEnv,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        shell: true,
-        windowsHide: true,
-      });
+      // Prefer invoking node.exe + the CLI entry directly so we depend on
+      // neither the .cmd shim nor PATH (the shim falls back to a bare `node`
+      // which fails when cmd.exe can't resolve it).
+      const direct = resolveDirectInvocation(this._command);
+      if (direct) {
+        this._process = spawn(direct.node, [direct.entry, ...args], {
+          cwd: this._cwd,
+          env: spawnEnv,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+        });
+      } else {
+        // Fallback: npm global installs create .cmd shims that spawn() cannot
+        // find without a shell. Build one command string so the deprecation
+        // warning about unsanitised args does not fire.
+        const cmdLine = [this._command, ...args].map(quoteCmdArg).join(' ');
+        this._process = spawn(cmdLine, [], {
+          cwd: this._cwd,
+          env: spawnEnv,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: true,
+          windowsHide: true,
+        });
+      }
     } else {
       this._process = spawn(this._command, args, {
         cwd: this._cwd,
