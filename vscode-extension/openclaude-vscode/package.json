@@ -2,7 +2,7 @@
   "name": "open-matrix-vscode",
   "displayName": "OPEN MATRIX",
   "description": "Acompanhante prático do VS Code para o OPEN MATRIX com inicialização inteligente e painel de controle integrado.",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "publisher": "devnull-bootloader",
   "engines": {
     "vscode": "^1.95.0"
