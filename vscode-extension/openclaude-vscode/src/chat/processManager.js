@@ -79,6 +79,70 @@ function withPdfToolPath(env) {
   return { ...env, [pathKey]: currentPath ? `${extraPath};${currentPath}` : extraPath };
 }
 
+// The npm global `open-matrix.cmd`/`open-matrix` shim invokes `node` on its
+// first line.  The VS Code extension host runs on Electron (process.execPath is
+// Code.exe), so the spawned shell only sees `node` if Node's install dir is on
+// PATH.  When VS Code was launched before Node was installed (or PATH was not
+// refreshed) the shim dies with "'node' is not recognized".  Prepend the
+// directory that actually contains node to the child PATH.
+function resolveNodeDir() {
+  const fs = require('fs');
+  const path = require('path');
+  const isWin = process.platform === 'win32';
+  const nodeBin = isWin ? 'node.exe' : 'node';
+
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+  const sep = isWin ? ';' : ':';
+  const seen = new Set();
+  const onPath = String(process.env[pathKey] || '')
+    .split(sep)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  for (const dir of onPath) {
+    try {
+      if (fs.existsSync(path.join(dir, nodeBin))) return null; // already reachable
+    } catch { /* ignore unreadable PATH entry */ }
+  }
+
+  const candidates = [];
+  if (isWin) {
+    if (process.env.ProgramFiles) candidates.push(path.join(process.env.ProgramFiles, 'nodejs'));
+    if (process.env['ProgramFiles(x86)']) candidates.push(path.join(process.env['ProgramFiles(x86)'], 'nodejs'));
+    if (process.env.APPDATA) candidates.push(path.join(process.env.APPDATA, 'npm'));
+    if (process.env.LOCALAPPDATA) {
+      candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs'));
+      candidates.push(path.join(process.env.LOCALAPPDATA, 'fnm_multishells'));
+    }
+  } else {
+    candidates.push('/usr/local/bin', '/usr/bin', '/opt/homebrew/bin');
+    if (process.env.HOME) {
+      candidates.push(path.join(process.env.HOME, '.local', 'bin'));
+      candidates.push(path.join(process.env.HOME, '.volta', 'bin'));
+    }
+  }
+
+  for (const dir of candidates) {
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    try {
+      if (fs.existsSync(path.join(dir, nodeBin))) return dir;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
+function withNodeOnPath(env) {
+  const nodeDir = resolveNodeDir();
+  if (!nodeDir) return env;
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || (process.platform === 'win32' ? 'Path' : 'PATH');
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const currentPath = env[pathKey] || '';
+  const entries = currentPath.split(sep).map((e) => e.toLowerCase());
+  if (entries.includes(nodeDir.toLowerCase())) return env;
+  return { ...env, [pathKey]: currentPath ? `${nodeDir}${sep}${currentPath}` : nodeDir };
+}
+
 class ProcessManager {
   /**
    * @param {object} opts
@@ -137,7 +201,7 @@ class ProcessManager {
       appendSystemPrompt: this._appendSystemPrompt,
     });
 
-    const spawnEnv = withPdfToolPath({ ...process.env, ...this._env });
+    const spawnEnv = withNodeOnPath(withPdfToolPath({ ...process.env, ...this._env }));
     const isWin = process.platform === 'win32';
 
     if (isWin) {

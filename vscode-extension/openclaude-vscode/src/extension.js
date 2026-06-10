@@ -12,7 +12,7 @@ const {
   resolveCommandCheckPath,
 } = require('./state');
 const { buildControlCenterViewModel } = require('./presentation');
-const { ChatController, OpenMatrixChatViewProvider, OpenMatrixChatPanelManager } = require('./chat/chatProvider');
+const { ChatController, ChatTabManager, OpenMatrixChatViewProvider, OpenMatrixChatPanelManager } = require('./chat/chatProvider');
 const { SessionManager } = require('./chat/sessionManager');
 const { DiffContentProvider, SCHEME: DIFF_SCHEME } = require('./chat/diffController');
 const { withBundledPopplerEnv } = require('./poppler');
@@ -1088,9 +1088,9 @@ function activate(context) {
     sessionManager.setCwd(folders[0].uri.fsPath);
   }
 
-  const chatController = new ChatController(sessionManager);
-  const chatViewProvider = new OpenMatrixChatViewProvider(chatController);
-  const chatPanelManager = new OpenMatrixChatPanelManager(chatController);
+  const chatTabManager = new ChatTabManager(sessionManager);
+  const chatViewProvider = new OpenMatrixChatViewProvider(chatTabManager);
+  const chatPanelManager = new OpenMatrixChatPanelManager(chatTabManager);
 
   // ── Diff content provider ──
   const diffProvider = new DiffContentProvider();
@@ -1109,7 +1109,7 @@ function activate(context) {
   statusBarItem.command = 'openmatrix.openChat';
   statusBarItem.show();
 
-  chatController.onDidChangeState((state) => {
+  chatTabManager.onActiveState((state) => {
     switch (state) {
       case 'streaming':
         statusBarItem.text = '$(sync~spin) OPEN MATRIX';
@@ -1125,6 +1125,7 @@ function activate(context) {
         break;
     }
   });
+  chatTabManager.createTab();
 
   // ── Existing commands ──
   const startCommand = vscode.commands.registerCommand('openmatrix.start', async () => {
@@ -1169,8 +1170,7 @@ function activate(context) {
 
   // ── New chat commands ──
   const newChatCommand = vscode.commands.registerCommand('openmatrix.newChat', () => {
-    chatController.stopSession();
-    chatController.broadcast({ type: 'session_cleared' });
+    chatTabManager.createTab();
   });
 
   const openChatCommand = vscode.commands.registerCommand('openmatrix.openChat', () => {
@@ -1193,14 +1193,16 @@ function activate(context) {
       placeHolder: 'Selecione uma sessão para retomar',
     });
     if (picked) {
-      chatController.stopSession();
-      chatController.broadcast({ type: 'session_cleared' });
-      await chatController.startSession({ sessionId: picked.sessionId });
+      const ctl = chatTabManager.getActive() || chatTabManager.ensureTab(null);
+      ctl.stopSession();
+      ctl.broadcast({ type: 'session_cleared', tabId: ctl.tabId });
+      await ctl.startSession({ sessionId: picked.sessionId });
     }
   });
 
   const abortChatCommand = vscode.commands.registerCommand('openmatrix.abortChat', () => {
-    chatController.abort();
+    const ctl = chatTabManager.getActive();
+    if (ctl) ctl.abort();
   });
 
   // ── Register providers ──
@@ -1254,7 +1256,7 @@ function activate(context) {
     profileWatcher.onDidChange(refreshProvider),
     profileWatcher.onDidDelete(refreshProvider),
     // disposables
-    { dispose: () => chatController.dispose() },
+    { dispose: () => chatTabManager.dispose() },
     { dispose: () => chatPanelManager.dispose() },
     { dispose: () => diffProvider.dispose() },
   );

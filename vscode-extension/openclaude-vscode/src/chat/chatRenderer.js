@@ -807,6 +807,97 @@ function renderChatHtml({ nonce, platform }) {
     .session-item-preview { font-size: 11px; color: var(--oc-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-item-time { font-size: 10px; color: var(--oc-text-soft); margin-top: 2px; }
     .session-empty { text-align: center; padding: 32px; color: var(--oc-text-soft); }
+    .drop-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(2px);
+      pointer-events: none;
+    }
+    .drop-overlay.visible { display: flex; }
+    .drop-overlay-inner {
+      border: 2px dashed var(--oc-accent, #6cf);
+      border-radius: 14px;
+      padding: 32px 48px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--oc-text, #fff);
+      background: rgba(20,20,28,0.85);
+      text-align: center;
+    }
+    .drop-overlay-hint { font-size: 12px; font-weight: 400; color: var(--oc-text-dim); margin-top: 6px; }
+    .tab-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 6px 0 6px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--oc-border, rgba(255,255,255,0.08));
+      background: var(--oc-bg-soft, rgba(255,255,255,0.02));
+      scrollbar-width: thin;
+    }
+    .tab-bar:empty { display: none; }
+    .tab {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      max-width: 180px;
+      border-radius: 8px 8px 0 0;
+      font-size: 12px;
+      color: var(--oc-text-dim, #aaa);
+      background: transparent;
+      cursor: pointer;
+      white-space: nowrap;
+      border: 1px solid transparent;
+      border-bottom: none;
+    }
+    .tab:hover { background: var(--oc-hover, rgba(255,255,255,0.06)); }
+    .tab.active {
+      color: var(--oc-text, #fff);
+      background: var(--oc-bg, rgba(255,255,255,0.08));
+      border-color: var(--oc-border, rgba(255,255,255,0.12));
+    }
+    .tab-label { overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+    .tab-stream-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--oc-accent, #6cf);
+      animation: oc-pulse 1.2s ease-in-out infinite;
+      flex: 0 0 auto;
+    }
+    @keyframes oc-pulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+    .tab-close {
+      opacity: 0.5;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0 2px;
+      border-radius: 4px;
+      flex: 0 0 auto;
+    }
+    .tab-close:hover { opacity: 1; background: var(--oc-hover, rgba(255,255,255,0.15)); }
+    .tab-add {
+      padding: 4px 10px;
+      font-size: 16px;
+      line-height: 1;
+      color: var(--oc-text-dim, #aaa);
+      cursor: pointer;
+      border-radius: 6px;
+      flex: 0 0 auto;
+    }
+    .tab-add:hover { background: var(--oc-hover, rgba(255,255,255,0.08)); color: var(--oc-text, #fff); }
+    .plan-card .plan-body {
+      margin: 8px 0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--oc-bg-soft, rgba(255,255,255,0.04));
+      max-height: 320px;
+      overflow-y: auto;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -816,6 +907,7 @@ function renderChatHtml({ nonce, platform }) {
     <button class="header-btn" id="newChatBtn" title="Nova conversa">+ Nova</button>
     <button class="header-btn danger" id="abortBtn" title="Parar resposta">Parar</button>
   </div>
+  <div class="tab-bar" id="tabBar" role="tablist" aria-label="Conversas abertas"></div>
   <div class="status-bar">
     <span class="status-dot" id="statusDot"></span>
     <span class="status-text" id="statusText">Pronto</span>
@@ -847,6 +939,12 @@ function renderChatHtml({ nonce, platform }) {
 
   <div class="slash-palette" id="slashPalette" role="listbox" aria-label="Comandos de barra do OPEN MATRIX"></div>
   <div class="attachments-tray" id="attachmentsTray" aria-live="polite"></div>
+  <div class="drop-overlay" id="dropOverlay" aria-hidden="true">
+    <div class="drop-overlay-inner">
+      Solte os arquivos para anexar
+      <div class="drop-overlay-hint">Arquivos do explorer ou do seu sistema</div>
+    </div>
+  </div>
   <div class="input-area">
     <button class="attach-btn" id="attachBtn" title="Anexar arquivos">&#x1F4CE;</button>
     <textarea id="chatInput" placeholder="Mensagem para o OPEN MATRIX... Use / para comandos. Use o botao de anexo para arquivos." rows="1"></textarea>
@@ -868,6 +966,21 @@ function renderChatHtml({ nonce, platform }) {
 <script nonce="${nonce}">
 (function() {
   const vscode = acquireVsCodeApi();
+
+  // Outbound messages that act on a conversation must carry the active tabId so
+  // the host routes them to the right controller. Tab-management messages carry
+  // their own explicit tabId and are left untouched.
+  const _rawPostMessage = vscode.postMessage.bind(vscode);
+  const TAB_SCOPED_OUT = new Set([
+    'send_message', 'abort', 'local_slash_command', 'new_session',
+    'resume_session', 'permission_response', 'plan_decision', 'restore_request',
+  ]);
+  vscode.postMessage = function(message) {
+    if (message && TAB_SCOPED_OUT.has(message.type) && message.tabId === undefined && activeTabId) {
+      message = Object.assign({}, message, { tabId: activeTabId });
+    }
+    return _rawPostMessage(message);
+  };
 
   const messagesEl = document.getElementById('messages');
   const welcomeEl = document.getElementById('welcomeScreen');
@@ -892,6 +1005,8 @@ function renderChatHtml({ nonce, platform }) {
   let isStreaming = false;
   let currentAssistantEl = null;
   let currentTextEl = null;
+  let activeTabId = null;
+  const tabBarEl = document.getElementById('tabBar');
   let dynamicSlashCommands = ${JSON.stringify(DEFAULT_DYNAMIC_SLASH_COMMANDS)};
   let slashVisible = false;
   let slashSelectedIndex = 0;
@@ -1381,6 +1496,10 @@ function renderChatHtml({ nonce, platform }) {
 
   function appendPermissionCard(perm) {
     hideWelcome();
+    if (perm.isPlanApproval) {
+      appendPlanApprovalCard(perm);
+      return;
+    }
     const el = document.createElement('div');
     el.className = 'perm-card';
     el.dataset.requestId = perm.requestId || '';
@@ -1398,6 +1517,38 @@ function renderChatHtml({ nonce, platform }) {
         const action = btn.dataset.action;
         vscode.postMessage({
           type: 'permission_response',
+          requestId: perm.requestId,
+          toolUseId: perm.toolUseId || null,
+          action: action,
+        });
+        el.querySelectorAll('.perm-btn').forEach(b => { b.disabled = true; b.style.opacity = '0.4'; });
+        btn.style.opacity = '1';
+      });
+    });
+    messagesEl.appendChild(el);
+    scrollToBottom();
+  }
+
+  function appendPlanApprovalCard(perm) {
+    const el = document.createElement('div');
+    el.className = 'perm-card plan-card';
+    el.dataset.requestId = perm.requestId || '';
+    const planBody = perm.planText
+      ? '<div class="plan-body">' + renderMarkdown(perm.planText) + '</div>'
+      : (perm.inputPreview ? '<div class="perm-input">' + escapeForMd(perm.inputPreview) + '</div>' : '');
+    el.innerHTML =
+      '<div class="perm-title">Plano pronto para revisao</div>' +
+      '<div class="perm-desc">Revise o plano abaixo e escolha como prosseguir.</div>' +
+      planBody +
+      '<div class="perm-actions">' +
+        '<button class="perm-btn allow" data-action="allow">Aprovar e executar</button>' +
+        '<button class="perm-btn deny" data-action="deny">Manter no modo plano</button>' +
+      '</div>';
+    el.querySelectorAll('.perm-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        vscode.postMessage({
+          type: 'plan_decision',
           requestId: perm.requestId,
           toolUseId: perm.toolUseId || null,
           action: action,
@@ -1561,6 +1712,118 @@ function renderChatHtml({ nonce, platform }) {
     });
   }
 
+  function setupDragAndDrop() {
+    const overlay = document.getElementById('dropOverlay');
+    let dragDepth = 0;
+
+    function showOverlay() { if (overlay) overlay.classList.add('visible'); }
+    function hideOverlay() { dragDepth = 0; if (overlay) overlay.classList.remove('visible'); }
+
+    function hasFiles(dt) {
+      if (!dt) return false;
+      if (dt.types) {
+        for (const t of dt.types) {
+          if (t === 'Files' || t === 'text/uri-list' || t === 'application/vnd.code.tree.explorer' || t === 'resourceurls') return true;
+        }
+      }
+      return false;
+    }
+
+    window.addEventListener('dragenter', (e) => {
+      if (!hasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      dragDepth++;
+      showOverlay();
+    });
+    window.addEventListener('dragover', (e) => {
+      if (!hasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    });
+    window.addEventListener('dragleave', (e) => {
+      if (!hasFiles(e.dataTransfer)) return;
+      dragDepth--;
+      if (dragDepth <= 0) hideOverlay();
+    });
+    window.addEventListener('drop', async (e) => {
+      if (!e.dataTransfer) return;
+      e.preventDefault();
+      hideOverlay();
+      if (isStreaming) {
+        appendStatusMessage('Aguarde a resposta terminar para anexar arquivos.');
+        return;
+      }
+      await handleDroppedData(e.dataTransfer);
+    });
+  }
+
+  async function handleDroppedData(dt) {
+    // 1) VS Code explorer drops expose file paths via uri-list / resourceurls.
+    const uriPaths = [];
+    const uriCandidates = [];
+    try {
+      const resourceUrls = dt.getData('resourceurls');
+      if (resourceUrls) {
+        const arr = JSON.parse(resourceUrls);
+        if (Array.isArray(arr)) uriCandidates.push(...arr);
+      }
+    } catch { /* not resourceurls */ }
+    const uriList = dt.getData('text/uri-list');
+    if (uriList) {
+      uriList.split(/\\r?\\n/).forEach((line) => {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) uriCandidates.push(trimmed);
+      });
+    }
+    for (const raw of uriCandidates) {
+      if (typeof raw !== 'string') continue;
+      let uri = raw;
+      if (uri.startsWith('file://')) {
+        try { uri = decodeURIComponent(uri.slice('file://'.length)); } catch { uri = uri.slice('file://'.length); }
+        // Windows file URIs look like /C:/path; strip the leading slash.
+        if (uri.length > 2 && uri.charAt(0) === '/' && uri.charAt(2) === ':' && /[A-Za-z]/.test(uri.charAt(1))) {
+          uri = uri.slice(1);
+        }
+      }
+      if (uri && !uri.startsWith('http')) uriPaths.push(uri);
+    }
+    if (uriPaths.length > 0) {
+      vscode.postMessage({ type: 'drop_paths', paths: uriPaths });
+      return;
+    }
+
+    // 2) OS file drops expose File objects. Images go through the inline
+    //    base64 attach flow; other files are written to a temp path by the host.
+    const files = dt.files ? Array.from(dt.files) : [];
+    if (files.length === 0) return;
+    setStatusLabel('Anexando arquivos...');
+    try {
+      const payload = await Promise.all(files.map((file, i) => fileToDropPayload(file, i)));
+      vscode.postMessage({ type: 'drop_files', files: payload });
+    } catch (err) {
+      appendStatusMessage('Anexo: ' + (err && err.message ? err.message : String(err)));
+      setStatusLabel('Falha ao anexar arquivos');
+    }
+  }
+
+  function fileToDropPayload(file, index) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const comma = result.indexOf(',');
+        resolve({
+          name: file.name || ('arquivo-' + Date.now() + '-' + index),
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size || 0,
+          dataBase64: comma >= 0 ? result.slice(comma + 1) : result,
+        });
+      };
+      reader.onerror = () => reject(reader.error || new Error('Falha ao ler arquivo solto'));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function handlePaste(event) {
     const clipboard = event.clipboardData;
     if (!clipboard || isStreaming) return;
@@ -1664,6 +1927,7 @@ function renderChatHtml({ nonce, platform }) {
     attachBtn.addEventListener('click', () => vscode.postMessage({ type: 'pick_files' }));
   }
   document.addEventListener('paste', handlePaste);
+  setupDragAndDrop();
   abortBtn.addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
   newChatBtn.addEventListener('click', () => vscode.postMessage({ type: 'new_session' }));
   historyBtn.addEventListener('click', () => {
@@ -1709,10 +1973,81 @@ function renderChatHtml({ nonce, platform }) {
     }
   });
 
+  // ---- Tab bar (multiplas conversas) ----
+  function renderTabBar(tabs, newActiveId) {
+    if (!tabBarEl) return;
+    const switchingTab = newActiveId && newActiveId !== activeTabId;
+    activeTabId = newActiveId || activeTabId;
+    tabBarEl.innerHTML = '';
+
+    tabs.forEach((tab) => {
+      const tabEl = document.createElement('div');
+      tabEl.className = 'tab' + (tab.tabId === activeTabId ? ' active' : '');
+      tabEl.setAttribute('role', 'tab');
+      tabEl.dataset.tabId = tab.tabId;
+
+      const label = document.createElement('span');
+      label.className = 'tab-label';
+      label.textContent = tab.title || 'Conversa';
+      if (tab.streaming) {
+        const dot = document.createElement('span');
+        dot.className = 'tab-stream-dot';
+        tabEl.appendChild(dot);
+      }
+      tabEl.appendChild(label);
+
+      const closeBtn = document.createElement('span');
+      closeBtn.className = 'tab-close';
+      closeBtn.textContent = '\u00d7';
+      closeBtn.title = 'Fechar conversa';
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'close_tab', tabId: tab.tabId });
+      });
+      tabEl.appendChild(closeBtn);
+
+      tabEl.addEventListener('click', () => {
+        if (tab.tabId !== activeTabId) {
+          vscode.postMessage({ type: 'switch_tab', tabId: tab.tabId });
+        }
+      });
+      tabBarEl.appendChild(tabEl);
+    });
+
+    const addBtn = document.createElement('div');
+    addBtn.className = 'tab-add';
+    addBtn.textContent = '+';
+    addBtn.title = 'Nova conversa';
+    addBtn.addEventListener('click', () => vscode.postMessage({ type: 'new_tab' }));
+    tabBarEl.appendChild(addBtn);
+
+    // When the host switches the active tab, clear the view; the host follows
+    // up with restore_messages for the newly active tab.
+    if (switchingTab) {
+      messagesEl.innerHTML = '';
+      currentAssistantEl = null;
+      currentTextEl = null;
+      showWelcome();
+    }
+  }
+
   /* ── Message handling from extension ── */
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (!msg) return;
+
+    // Tab bar state is global; render it regardless of active tab.
+    if (msg.type === 'tabs_state') {
+      renderTabBar(msg.tabs || [], msg.activeTabId);
+      return;
+    }
+    // Every other broadcast is tab-scoped. Ignore traffic for background tabs
+    // so a streaming conversation in tab B never corrupts the view of tab A.
+    // Background tabs keep accumulating in their controller and are rebuilt via
+    // restore_messages when the user switches to them.
+    if (msg.tabId && activeTabId && msg.tabId !== activeTabId) {
+      return;
+    }
 
     switch (msg.type) {
       case 'stream_start':

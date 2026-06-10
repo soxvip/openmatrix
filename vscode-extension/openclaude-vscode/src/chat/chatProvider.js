@@ -142,6 +142,39 @@ async function savePastedFilesForWebview(webview, files) {
   }
 }
 
+// Files dropped from the VS Code explorer arrive as on-disk paths; attach them
+// directly without round-tripping through base64.
+async function attachDroppedPathsForWebview(webview, paths) {
+  try {
+    const items = Array.isArray(paths) ? paths : [];
+    if (items.length === 0) return;
+    const attachments = [];
+    const errors = [];
+    for (const raw of items) {
+      const fsPath = String(raw || '').trim();
+      if (!fsPath) continue;
+      try {
+        const stat = await fs.promises.stat(fsPath);
+        if (stat.isDirectory()) {
+          errors.push(`${fsPath}: pastas nao podem ser anexadas`);
+          continue;
+        }
+        attachments.push(await attachmentFromPath(fsPath));
+      } catch (err) {
+        errors.push(err && err.message ? err.message : String(err));
+      }
+    }
+    if (attachments.length > 0) {
+      webview.postMessage({ type: 'attachments_picked', attachments });
+    }
+    if (errors.length > 0) {
+      webview.postMessage({ type: 'attachments_error', message: errors.join('\n') });
+    }
+  } catch (err) {
+    webview.postMessage({ type: 'attachments_error', message: err && err.message ? err.message : String(err) });
+  }
+}
+
 function getLaunchConfig() {
   const cfg = vscode.workspace.getConfiguration('openmatrix');
   const command = cfg.get('launchCommand', 'open-matrix');
@@ -183,6 +216,8 @@ class ChatController {
     /** @type {Map<string, { input: Record<string, unknown>, permissionSuggestions: unknown[], toolUseId: string | null }>} */
     this._pendingPermissions = new Map();
 
+    this._tabId = null;
+
     this._onDidChangeState = new vscode.EventEmitter();
     this.onDidChangeState = this._onDidChangeState.event;
   }
@@ -191,14 +226,28 @@ class ChatController {
   get isStreaming() { return this._process && this._process.running; }
   get sessionManager() { return this._sessionManager; }
 
+  // Tab identity: every controller belongs to one chat tab. Broadcasts are
+  // tagged with this id so a webview hosting multiple tabs can route messages
+  // to the correct tab and ignore background-tab traffic for rendering.
+  setTabId(tabId) { this._tabId = tabId; }
+  get tabId() { return this._tabId || null; }
+  get tabTitle() { return this._tabTitle || 'Conversa'; }
+  setTabTitle(title) {
+    const next = String(title || '').trim();
+    if (next && next !== this._tabTitle) {
+      this._tabTitle = next.length > 40 ? next.slice(0, 39) + '…' : next;
+    }
+  }
+
   registerWebview(webview) {
     this._webviews.add(webview);
     return { dispose: () => this._webviews.delete(webview) };
   }
 
   broadcast(msg) {
+    const tagged = (msg && this._tabId && msg.tabId === undefined) ? { ...msg, tabId: this._tabId } : msg;
     for (const wv of this._webviews) {
-      try { wv.postMessage(msg); } catch { /* webview might be disposed */ }
+      try { wv.postMessage(tagged); } catch { /* webview might be disposed */ }
     }
   }
 
@@ -327,6 +376,7 @@ class ChatController {
   }
 
   async sendMessage(text, attachments = []) {
+    if (text && !this._tabTitle) this.setTabTitle(text);
     // Keep the process alive for multi-turn â€” just send directly.
     // The CLI maintains full session state (tools, history) across turns.
     // Only start a new process if none exists or it died.
@@ -404,6 +454,23 @@ class ChatController {
 
   getMessages() { return this._messages; }
 
+  // Plan approval card: approving answers the ExitPlanMode permission with
+  // "allow" and drops the session out of plan mode into an executing mode so
+  // the agent can act. Rejecting answers "deny" and keeps plan mode. Context is
+  // preserved because we only set an override; the running process keeps its
+  // session.
+  async handlePlanDecision(requestId, action, toolUseId) {
+    const approve = action === 'allow';
+    this.sendPermissionResponse(requestId, approve ? 'allow' : 'deny', toolUseId);
+    if (approve) {
+      this._permissionModeOverride = 'acceptEdits';
+      const powerState = this.getPowerState('acceptEdits');
+      this._broadcast({ type: 'power_state', ...powerState });
+      this._broadcast({ type: 'status', content: 'Plano aprovado - executando com edicoes automaticas; contexto preservado' });
+    } else {
+      this._broadcast({ type: 'status', content: 'Plano mantido - continuando no modo plano' });
+    }
+  }
   _handleMessage(msg) {
     if (msg.session_id && !this._currentSessionId) {
       this._currentSessionId = msg.session_id;
@@ -446,14 +513,21 @@ class ChatController {
           toolUseId: req.tool_use_id || null,
         });
       }
+      const toolName = req.tool_name || 'Desconhecida';
+      const isPlanApproval = /exitplanmode/i.test(String(toolName));
+      const planText = isPlanApproval
+        ? String((toolInput && (toolInput.plan || toolInput.message)) || '')
+        : '';
       this._broadcast({
         type: 'permission_request',
         requestId,
-        toolName: req.tool_name || 'Desconhecida',
+        toolName,
         displayName: req.display_name || req.title || toolDisplayName(req.tool_name),
         description: req.description || '',
         inputPreview: parseToolInput(req.input),
         toolUseId: req.tool_use_id || null,
+        isPlanApproval,
+        planText,
       });
       return;
     }
@@ -691,10 +765,161 @@ class ChatController {
   }
 }
 
+// Manages multiple ChatController instances — one per chat tab. Each tab owns
+// its own CLI process, message history and session id, so switching tabs keeps
+// every conversation's context alive. All controllers fan their broadcasts out
+// to the same set of webviews, tagged with their tabId; the webview shows only
+// the active tab and keeps the others buffered.
+class ChatTabManager {
+  constructor(sessionManager) {
+    this._sessionManager = sessionManager;
+    /** @type {Map<string, ChatController>} */
+    this._controllers = new Map();
+    this._webviews = new Set();
+    this._activeTabId = null;
+    this._seq = 0;
+    this._onDidChangeState = new vscode.EventEmitter();
+    this.onActiveState = this._onDidChangeState.event;
+  }
+
+  maybeTitleFromText(tabId, text) {
+    const ctl = this._controllers.get(tabId);
+    if (ctl) {
+      ctl.setTabTitle(text);
+      this._broadcastTabs();
+    }
+  }
+
+  registerWebview(webview) {
+    this._webviews.add(webview);
+    for (const controller of this._controllers.values()) {
+      controller.registerWebview(webview);
+    }
+    return { dispose: () => {
+      this._webviews.delete(webview);
+      for (const controller of this._controllers.values()) {
+        controller._webviews.delete(webview);
+      }
+    } };
+  }
+
+  _newTabId() {
+    this._seq += 1;
+    return `tab-${Date.now().toString(36)}-${this._seq}`;
+  }
+
+  createTab(opts = {}) {
+    const tabId = opts.tabId || this._newTabId();
+    const controller = new ChatController(this._sessionManager);
+    controller.setTabId(tabId);
+    for (const wv of this._webviews) controller.registerWebview(wv);
+    controller.onDidChangeState((state) => {
+      if (tabId === this._activeTabId) this._onDidChangeState.fire(state);
+    });
+    this._controllers.set(tabId, controller);
+    this._activeTabId = tabId;
+    this._broadcastTabs();
+    return tabId;
+  }
+
+  // Forward the active tab's streaming state to a single listener (e.g. the
+  // status bar). Only the active tab drives the indicator.
+  onActiveState(listener) {
+    this._stateListener = listener;
+  }
+
+  newChatActive() {
+    const ctl = this.getActive();
+    if (ctl) {
+      ctl.stopSession();
+      ctl.broadcast({ type: 'session_cleared' });
+    }
+  }
+
+  abortActive() {
+    const ctl = this.getActive();
+    if (ctl) ctl.abort();
+  }
+
+  get(tabId) { return this._controllers.get(tabId) || null; }
+
+  getActive() { return this._activeTabId ? this._controllers.get(this._activeTabId) : null; }
+
+  ensureTab(tabId) {
+    if (tabId && this._controllers.has(tabId)) return this._controllers.get(tabId);
+    const id = this.createTab({ tabId });
+    return this._controllers.get(id);
+  }
+
+  setActive(tabId) {
+    if (!this._controllers.has(tabId)) return;
+    this._activeTabId = tabId;
+    this._broadcastTabs();
+  }
+
+  // Derive a short tab title from the first user message so tabs are
+  // distinguishable without manual naming.
+  maybeTitleFromText(tabId, text) {
+    const ctrl = this._controllers.get(tabId);
+    if (!ctrl) return;
+    if (ctrl.tabTitle && ctrl.tabTitle !== 'Conversa') return;
+    const clean = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!clean) return;
+    ctrl.setTabTitle(clean);
+    this._broadcastTabs();
+  }
+
+  closeTab(tabId) {
+    const controller = this._controllers.get(tabId);
+    if (!controller) return;
+    controller.dispose();
+    this._controllers.delete(tabId);
+    if (this._activeTabId === tabId) {
+      const remaining = Array.from(this._controllers.keys());
+      this._activeTabId = remaining.length ? remaining[remaining.length - 1] : null;
+    }
+    if (this._controllers.size === 0) {
+      this.createTab();
+    } else {
+      this._broadcastTabs();
+    }
+  }
+
+  _tabSummaries() {
+    return Array.from(this._controllers.entries()).map(([id, ctrl]) => ({
+      tabId: id,
+      title: ctrl.tabTitle || 'Conversa',
+      streaming: Boolean(ctrl.isStreaming),
+      active: id === this._activeTabId,
+    }));
+  }
+
+  _broadcastTabs() {
+    const payload = { type: 'tabs_state', tabs: this._tabSummaries(), activeTabId: this._activeTabId };
+    for (const wv of this._webviews) {
+      try { wv.postMessage(payload); } catch { /* disposed */ }
+    }
+  }
+
+  dispose() {
+    for (const controller of this._controllers.values()) controller.dispose();
+    this._controllers.clear();
+    this._webviews.clear();
+  }
+}
+
 class OpenMatrixChatViewProvider {
-  constructor(chatController) {
-    this._chatController = chatController;
+  constructor(tabManager) {
+    this._tabs = tabManager;
     this._webviewView = null;
+  }
+
+  // Resolve the controller for an incoming webview message, creating the tab if
+  // needed so the very first message lands in a real conversation.
+  _ctl(msg) {
+    const tabId = msg && msg.tabId;
+    if (tabId) return this._tabs.ensureTab(tabId);
+    return this._tabs.getActive() || this._tabs.ensureTab(null);
   }
 
   resolveWebviewView(webviewView, _context, _token) {
@@ -702,7 +927,7 @@ class OpenMatrixChatViewProvider {
     const webview = webviewView.webview;
     webview.options = { enableScripts: true };
 
-    const registration = this._chatController.registerWebview(webview);
+    const registration = this._tabs.registerWebview(webview);
     webviewView.onDidDispose(() => {
       registration.dispose();
       if (this._webviewView === webviewView) this._webviewView = null;
@@ -720,33 +945,59 @@ class OpenMatrixChatViewProvider {
   _attachMessageHandler(webview) {
     webview.onDidReceiveMessage(async (msg) => {
       switch (msg.type) {
-        case 'send_message':
-          this._chatController.sendMessage(msg.text, msg.attachments);
+        case 'send_message': {
+          const ctl = this._ctl(msg);
+          ctl.sendMessage(msg.text, msg.attachments);
+          if (msg.text) this._tabs.maybeTitleFromText(ctl.tabId, msg.text);
           break;
+        }
         case 'pick_files':
           await pickFilesForWebview(webview);
           break;
         case 'paste_files':
           await savePastedFilesForWebview(webview, msg.files);
           break;
+        case 'drop_files':
+          await savePastedFilesForWebview(webview, msg.files);
+          break;
+        case 'drop_paths':
+          await attachDroppedPathsForWebview(webview, msg.paths);
+          break;
         case 'local_slash_command':
-          await this._chatController.handleLocalSlashCommand(msg.command);
+          await this._ctl(msg).handleLocalSlashCommand(msg.command);
           break;
         case 'abort':
-          this._chatController.abort();
+          this._ctl(msg).abort();
           break;
-        case 'new_session':
-          this._chatController.stopSession();
-          webview.postMessage({ type: 'session_cleared' });
+        case 'new_tab':
+          this._tabs.createTab();
           break;
-        case 'resume_session':
-          this._chatController.stopSession();
-          webview.postMessage({ type: 'session_cleared' });
-          await this._loadAndDisplaySession(webview, msg.sessionId);
-          await this._chatController.startSession({ sessionId: msg.sessionId });
+        case 'switch_tab':
+          this._tabs.setActive(msg.tabId);
+          this._restoreMessagesFor(webview, msg.tabId);
           break;
+        case 'close_tab':
+          this._tabs.closeTab(msg.tabId);
+          break;
+        case 'new_session': {
+          const ctl = this._ctl(msg);
+          ctl.stopSession();
+          webview.postMessage({ type: 'session_cleared', tabId: ctl.tabId });
+          break;
+        }
+        case 'resume_session': {
+          const ctl = this._ctl(msg);
+          ctl.stopSession();
+          webview.postMessage({ type: 'session_cleared', tabId: ctl.tabId });
+          await this._loadAndDisplaySession(webview, ctl, msg.sessionId);
+          await ctl.startSession({ sessionId: msg.sessionId });
+          break;
+        }
         case 'permission_response':
-          this._chatController.sendPermissionResponse(msg.requestId, msg.action, msg.toolUseId);
+          this._ctl(msg).sendPermissionResponse(msg.requestId, msg.action, msg.toolUseId);
+          break;
+        case 'plan_decision':
+          await this._ctl(msg).handlePlanDecision(msg.requestId, msg.action, msg.toolUseId);
           break;
         case 'copy_code':
           if (msg.text) await vscode.env.clipboard.writeText(msg.text);
@@ -758,47 +1009,55 @@ class OpenMatrixChatViewProvider {
           await this._sendSessionList(webview);
           break;
         case 'restore_request':
-          this._restoreMessages(webview);
+          this._restoreMessagesFor(webview, msg.tabId);
           break;
         case 'webview_ready':
+          this._tabs._broadcastTabs();
           break;
       }
     });
   }
 
   async _sendSessionList(webview) {
-    if (!this._chatController.sessionManager) return;
+    const ctl = this._tabs.getActive();
+    if (!ctl || !ctl.sessionManager) return;
     try {
-      const sessions = await this._chatController.sessionManager.listSessions();
+      const sessions = await ctl.sessionManager.listSessions();
       webview.postMessage({ type: 'session_list', sessions });
     } catch {
       webview.postMessage({ type: 'session_list', sessions: [] });
     }
   }
 
-  _restoreMessages(webview) {
-    const messages = this._chatController.getMessages();
-    if (messages.length > 0) {
-      webview.postMessage({ type: 'restore_messages', messages });
-    }
+  _restoreMessagesFor(webview, tabId) {
+    const ctl = this._tabs.get(tabId) || this._tabs.getActive();
+    if (!ctl) return;
+    const messages = ctl.getMessages();
+    webview.postMessage({ type: 'restore_messages', messages: messages || [], tabId: ctl.tabId });
   }
 
-  async _loadAndDisplaySession(webview, sessionId) {
-    if (!this._chatController.sessionManager) return;
+  async _loadAndDisplaySession(webview, ctl, sessionId) {
+    if (!ctl || !ctl.sessionManager) return;
     try {
-      const messages = await this._chatController.sessionManager.loadSession(sessionId);
+      const messages = await ctl.sessionManager.loadSession(sessionId);
       if (messages && messages.length > 0) {
-        this._chatController._messages = messages;
-        webview.postMessage({ type: 'restore_messages', messages });
+        ctl._messages = messages;
+        webview.postMessage({ type: 'restore_messages', messages, tabId: ctl.tabId });
       }
     } catch { /* session may not be loadable */ }
   }
 }
 
 class OpenMatrixChatPanelManager {
-  constructor(chatController) {
-    this._chatController = chatController;
+  constructor(tabManager) {
+    this._tabs = tabManager;
     this._panel = null;
+  }
+
+  _ctl(msg) {
+    const tabId = msg && msg.tabId;
+    if (tabId) return this._tabs.ensureTab(tabId);
+    return this._tabs.getActive() || this._tabs.ensureTab(null);
   }
 
   openPanel() {
@@ -818,7 +1077,7 @@ class OpenMatrixChatPanelManager {
     );
 
     const webview = this._panel.webview;
-    const registration = this._chatController.registerWebview(webview);
+    const registration = this._tabs.registerWebview(webview);
 
     this._panel.onDidDispose(() => {
       registration.dispose();
@@ -829,42 +1088,72 @@ class OpenMatrixChatPanelManager {
     webview.html = renderChatHtml({ nonce, platform: process.platform });
     this._attachMessageHandler(webview);
 
-    const messages = this._chatController.getMessages();
-    if (messages.length > 0) {
-      webview.postMessage({ type: 'restore_messages', messages });
+    this._tabs._broadcastTabs();
+    const active = this._tabs.getActive();
+    if (active) {
+      const messages = active.getMessages();
+      if (messages && messages.length > 0) {
+        webview.postMessage({ type: 'restore_messages', messages, tabId: active.tabId });
+      }
     }
   }
 
   _attachMessageHandler(webview) {
     webview.onDidReceiveMessage(async (msg) => {
       switch (msg.type) {
-        case 'send_message':
-          this._chatController.sendMessage(msg.text, msg.attachments);
+        case 'send_message': {
+          const ctl = this._ctl(msg);
+          ctl.sendMessage(msg.text, msg.attachments);
+          if (msg.text) this._tabs.maybeTitleFromText(ctl.tabId, msg.text);
           break;
+        }
         case 'pick_files':
           await pickFilesForWebview(webview);
           break;
         case 'paste_files':
           await savePastedFilesForWebview(webview, msg.files);
           break;
+        case 'drop_files':
+          await savePastedFilesForWebview(webview, msg.files);
+          break;
+        case 'drop_paths':
+          await attachDroppedPathsForWebview(webview, msg.paths);
+          break;
         case 'local_slash_command':
-          await this._chatController.handleLocalSlashCommand(msg.command);
+          await this._ctl(msg).handleLocalSlashCommand(msg.command);
           break;
         case 'abort':
-          this._chatController.abort();
+          this._ctl(msg).abort();
           break;
-        case 'new_session':
-          this._chatController.stopSession();
-          webview.postMessage({ type: 'session_cleared' });
+        case 'new_tab':
+          this._tabs.createTab();
           break;
-        case 'resume_session':
-          this._chatController.stopSession();
-          webview.postMessage({ type: 'session_cleared' });
-          await this._loadAndDisplaySession(webview, msg.sessionId);
-          await this._chatController.startSession({ sessionId: msg.sessionId });
+        case 'switch_tab':
+          this._tabs.setActive(msg.tabId);
+          this._restoreMessagesFor(webview, msg.tabId);
           break;
+        case 'close_tab':
+          this._tabs.closeTab(msg.tabId);
+          break;
+        case 'new_session': {
+          const ctl = this._ctl(msg);
+          ctl.stopSession();
+          webview.postMessage({ type: 'session_cleared', tabId: ctl.tabId });
+          break;
+        }
+        case 'resume_session': {
+          const ctl = this._ctl(msg);
+          ctl.stopSession();
+          webview.postMessage({ type: 'session_cleared', tabId: ctl.tabId });
+          await this._loadAndDisplaySession(webview, ctl, msg.sessionId);
+          await ctl.startSession({ sessionId: msg.sessionId });
+          break;
+        }
         case 'permission_response':
-          this._chatController.sendPermissionResponse(msg.requestId, msg.action, msg.toolUseId);
+          this._ctl(msg).sendPermissionResponse(msg.requestId, msg.action, msg.toolUseId);
+          break;
+        case 'plan_decision':
+          await this._ctl(msg).handlePlanDecision(msg.requestId, msg.action, msg.toolUseId);
           break;
         case 'copy_code':
           if (msg.text) await vscode.env.clipboard.writeText(msg.text);
@@ -876,38 +1165,40 @@ class OpenMatrixChatPanelManager {
           await this._sendSessionList(webview);
           break;
         case 'restore_request':
-          this._restoreMessages(webview);
+          this._restoreMessagesFor(webview, msg.tabId);
           break;
         case 'webview_ready':
+          this._tabs._broadcastTabs();
           break;
       }
     });
   }
 
   async _sendSessionList(webview) {
-    if (!this._chatController.sessionManager) return;
+    const ctl = this._tabs.getActive();
+    if (!ctl || !ctl.sessionManager) return;
     try {
-      const sessions = await this._chatController.sessionManager.listSessions();
+      const sessions = await ctl.sessionManager.listSessions();
       webview.postMessage({ type: 'session_list', sessions });
     } catch {
       webview.postMessage({ type: 'session_list', sessions: [] });
     }
   }
 
-  _restoreMessages(webview) {
-    const messages = this._chatController.getMessages();
-    if (messages.length > 0) {
-      webview.postMessage({ type: 'restore_messages', messages });
-    }
+  _restoreMessagesFor(webview, tabId) {
+    const ctl = this._tabs.get(tabId) || this._tabs.getActive();
+    if (!ctl) return;
+    const messages = ctl.getMessages();
+    webview.postMessage({ type: 'restore_messages', messages: messages || [], tabId: ctl.tabId });
   }
 
-  async _loadAndDisplaySession(webview, sessionId) {
-    if (!this._chatController.sessionManager) return;
+  async _loadAndDisplaySession(webview, ctl, sessionId) {
+    if (!ctl || !ctl.sessionManager) return;
     try {
-      const messages = await this._chatController.sessionManager.loadSession(sessionId);
+      const messages = await ctl.sessionManager.loadSession(sessionId);
       if (messages && messages.length > 0) {
-        this._chatController._messages = messages;
-        webview.postMessage({ type: 'restore_messages', messages });
+        ctl._messages = messages;
+        webview.postMessage({ type: 'restore_messages', messages, tabId: ctl.tabId });
       }
     } catch { /* session may not be loadable */ }
   }
@@ -922,6 +1213,7 @@ class OpenMatrixChatPanelManager {
 
 module.exports = {
   ChatController,
+  ChatTabManager,
   OpenMatrixChatViewProvider,
   OpenMatrixChatPanelManager,
 };
