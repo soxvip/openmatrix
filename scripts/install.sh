@@ -173,8 +173,48 @@ read_open_matrix_token
 [ -n "${OPEN_MATRIX_TOKEN// }" ] || fail 'Token vazio. Rode novamente em terminal interativo ou use: OPEN_MATRIX_API_KEY="seu-token" bash -c "$(curl -fsSL https://raw.githubusercontent.com/soxvip/openmatrix/main/scripts/install.sh)"'
 
 printf 'Configurando provider OPEN MATRIX...\n'
-printf '%s' "$OPEN_MATRIX_TOKEN" | open-matrix setup --token-stdin
+setup_log="${TMPDIR:-/tmp}/open-matrix-setup-$$-${RANDOM:-0}.log"
+setup_err="${TMPDIR:-/tmp}/open-matrix-setup-$$-${RANDOM:-0}.err"
+temp_files+=("$setup_log" "$setup_err")
+setup_succeeded=0
+setup_pid=''
+(
+  OPEN_MATRIX_API_KEY="$OPEN_MATRIX_TOKEN" open-matrix setup >"$setup_log" 2>"$setup_err"
+) &
+setup_pid=$!
+setup_deadline=$((SECONDS + 90))
+while [ "$SECONDS" -lt "$setup_deadline" ]; do
+  setup_text=''
+  [ -f "$setup_log" ] && setup_text="${setup_text}$(cat "$setup_log" 2>/dev/null || true)"
+  [ -f "$setup_err" ] && setup_text="${setup_text}$(cat "$setup_err" 2>/dev/null || true)"
+  if printf '%s' "$setup_text" | grep -q 'Configuracao OPEN MATRIX concluida\.'; then
+    setup_succeeded=1
+    break
+  fi
+  if ! kill -0 "$setup_pid" 2>/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
+
+if kill -0 "$setup_pid" 2>/dev/null; then
+  kill "$setup_pid" 2>/dev/null || true
+  sleep 1
+  kill -9 "$setup_pid" 2>/dev/null || true
+fi
+wait "$setup_pid" 2>/dev/null || setup_exit=$?
+setup_exit="${setup_exit:-0}"
+
+[ -s "$setup_log" ] && cat "$setup_log"
+[ -s "$setup_err" ] && cat "$setup_err" >&2
 unset OPEN_MATRIX_TOKEN
+
+if [ "$setup_succeeded" -ne 1 ] && [ "$setup_exit" -ne 0 ]; then
+  fail "Falha ao configurar provider OPEN MATRIX. Codigo: $setup_exit"
+fi
+if [ "$setup_succeeded" -ne 1 ]; then
+  fail 'Falha ao configurar provider OPEN MATRIX: tempo limite aguardando conclusao.'
+fi
 
 if [ "${OPEN_MATRIX_SKIP_VSCODE:-}" = '1' ]; then
   printf 'Instalacao da extensao VS Code pulada por OPEN_MATRIX_SKIP_VSCODE=1.\n'
@@ -189,4 +229,6 @@ else
   fi
 fi
 
-printf 'OPEN MATRIX instalado e configurado.\nUse: open-matrix\n'
+printf 'OPEN MATRIX instalado e configurado.\n'
+printf 'Abrindo OPEN MATRIX...\n'
+open-matrix
