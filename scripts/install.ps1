@@ -204,14 +204,38 @@ try {
   }
 }
 
-Add-NpmGlobalPrefixToPath
-$openMatrixCommand = Get-Command open-matrix.cmd -ErrorAction SilentlyContinue
-if (-not $openMatrixCommand) {
-  $openMatrixCommand = Get-Command open-matrix -ErrorAction SilentlyContinue
+function Get-OpenMatrixCommandPath() {
+  # Prefer the shim inside the npm global prefix where we just installed, so a
+  # stale shim from a previous/non-npm install earlier on PATH (e.g.
+  # %LOCALAPPDATA%\OpenMatrix\bin) does not get picked instead and crash with
+  # MODULE_NOT_FOUND.
+  $prefix = (& npm prefix -g 2>$null | Select-Object -First 1)
+  if (-not [string]::IsNullOrWhiteSpace($prefix)) {
+    $prefix = $prefix.Trim()
+    foreach ($name in @('open-matrix.cmd', 'open-matrix')) {
+      $candidate = Join-Path $prefix $name
+      if (Test-Path -LiteralPath $candidate) {
+        return $candidate
+      }
+    }
+  }
+
+  $fromPath = Get-Command open-matrix.cmd -ErrorAction SilentlyContinue
+  if (-not $fromPath) {
+    $fromPath = Get-Command open-matrix -ErrorAction SilentlyContinue
+  }
+  if ($fromPath) {
+    return $fromPath.Source
+  }
+  return $null
 }
-if (-not $openMatrixCommand) {
+
+Add-NpmGlobalPrefixToPath
+$openMatrixCommandPath = Get-OpenMatrixCommandPath
+if (-not $openMatrixCommandPath) {
   Fail 'Comando open-matrix nao encontrado apos instalacao. Verifique PATH do npm global e rode novamente.'
 }
+$openMatrixCommand = [pscustomobject]@{ Source = $openMatrixCommandPath }
 
 $token = $env:OPEN_MATRIX_API_KEY
 if ([string]::IsNullOrWhiteSpace($token)) {
