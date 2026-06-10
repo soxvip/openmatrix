@@ -226,15 +226,12 @@ Write-Host 'Configurando provider OPEN MATRIX...'
 $previousOpenMatrixApiKey = $env:OPEN_MATRIX_API_KEY
 try {
   $env:OPEN_MATRIX_API_KEY = $token
-  $setupOutput = & $openMatrixCommand.Source setup 2>&1
+  & $openMatrixCommand.Source setup
   $setupExitCode = $LASTEXITCODE
 } finally {
   $env:OPEN_MATRIX_API_KEY = $previousOpenMatrixApiKey
 }
 if ($setupExitCode -ne 0) {
-  if ($setupOutput) {
-    Write-Host ($setupOutput -join [Environment]::NewLine)
-  }
   Fail "Falha ao configurar provider OPEN MATRIX. Codigo: $setupExitCode"
 }
 
