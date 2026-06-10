@@ -186,6 +186,36 @@ async function main(): Promise<void> {
   // #808: --model alone (no --provider) — route to the env var matching the
   // active provider before the banner prints so the override is visible.
   if (args.includes('--model')) {
+    const { parseModelFlag } = await import('../utils/providerFlag.js')
+    const modelFlag = parseModelFlag(args)
+    if (modelFlag) {
+      const { parseUserSpecifiedModel } = await import('../utils/model/model.js')
+      const {
+        hasActiveTokenEntitlementGate,
+        isModelAllowedByTokenEntitlements,
+        loadActiveTokenEntitlements,
+      } = await import('../utils/model/tokenEntitlements.js')
+      const tokenEntitlements = await loadActiveTokenEntitlements()
+      if (hasActiveTokenEntitlementGate(tokenEntitlements)) {
+        const targetModel = parseUserSpecifiedModel(modelFlag)
+        const allowed = isModelAllowedByTokenEntitlements(
+          targetModel,
+          tokenEntitlements,
+        )
+        if (allowed !== true && allowed !== 'not-applicable') {
+          const message = tokenEntitlements.kind === 'error'
+            ? tokenEntitlements.message
+            : tokenEntitlements.kind === 'empty'
+              ? 'This API token has no assigned models.'
+              : targetModel === modelFlag
+                ? `Model '${modelFlag}' is not assigned to this API token.`
+                : `Model '${modelFlag}' resolves to '${targetModel}', which is not assigned to this API token.`
+          console.error(`Error: ${message}`)
+          process.exit(1)
+        }
+      }
+    }
+
     const { applyModelFlagFromArgs } = await import('../utils/providerFlag.js')
     applyModelFlagFromArgs(args)
   }

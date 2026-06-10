@@ -1,4 +1,4 @@
-import { beforeEach, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
 
 import {
   DGSIS_BASE_URL,
@@ -14,6 +14,7 @@ let activeProfileId: string | undefined
 
 function installProviderProfileMock(): void {
   mock.module('./providerProfiles.js', () => ({
+    getActiveProviderProfile: () => profiles.find(profile => profile.id === activeProfileId) ?? null,
     getProviderProfiles: () => profiles,
     addProviderProfile: (
       input: Omit<ProviderProfile, 'id'>,
@@ -40,6 +41,20 @@ function installProviderProfileMock(): void {
       activeProfileId = id
       return profiles.find(profile => profile.id === id) ?? null
     },
+    getProviderPresetDefaults: () => null,
+    hasProviderProfiles: () => profiles.length > 0,
+    clearProviderProfileEnvFromProcessEnv: () => {},
+    applyProviderProfileToProcessEnv: () => {},
+    applyActiveProviderProfileFromConfig: () => null,
+    persistActiveProviderProfileModel: () => null,
+    getConfiguredProfileModelOptions: () => [],
+    getProfileModelOptions: () => [],
+    deleteProviderProfile: () => ({ deleted: false }),
+    getActiveOpenAIModelOptionsCache: () => null,
+    setActiveOpenAIModelOptionsCache: () => {},
+    getActiveOpenAIRouteModelOptionsCache: () => null,
+    setActiveOpenAIRouteModelOptionsCache: () => {},
+    clearActiveOpenAIModelOptionsCache: () => {},
   }))
 }
 
@@ -48,6 +63,10 @@ beforeEach(() => {
   profiles = []
   activeProfileId = undefined
   installProviderProfileMock()
+})
+
+afterEach(() => {
+  mock.restore()
 })
 
 test('configureOpenMatrixProviderProfile creates active DGSIS profile with cx/gpt-5.5 primary', async () => {
@@ -75,6 +94,22 @@ test('configureOpenMatrixProviderProfile creates active DGSIS profile with cx/gp
     defaultModel: DGSIS_DEFAULT_MODEL,
     modelCount: DGSIS_MODEL_IDS.length,
   })
+})
+
+test('configureOpenMatrixProviderProfile stores assigned models with entitlement default first', async () => {
+  const nonce = `${Date.now()}-${Math.random()}`
+  const { configureOpenMatrixProviderProfile, getOpenMatrixSetupSummary } =
+    await import(`./openMatrixGatewayProfile.js?assigned=${nonce}`)
+
+  const result = configureOpenMatrixProviderProfile('fake-token', {
+    models: ['cx/gpt-5.5', 'kr/claude-opus-4.7'],
+    defaultModel: 'kr/claude-opus-4.7',
+  })
+  const summary = getOpenMatrixSetupSummary(result.profile)
+
+  expect(result.profile.model).toBe('kr/claude-opus-4.7,cx/gpt-5.5')
+  expect(summary.defaultModel).toBe('kr/claude-opus-4.7')
+  expect(summary.modelCount).toBe(2)
 })
 
 test('configureOpenMatrixProviderProfile updates existing OPEN MATRIX profile', async () => {

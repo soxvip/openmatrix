@@ -14,6 +14,7 @@ import {
 } from '../../utils/settings/settingsCache.js'
 import type { ModelOption } from '../../utils/model/modelOptions.js'
 import type { ModelSetting } from '../../utils/model/model.js'
+import { clearTokenEntitlementsCache } from '../../utils/model/tokenEntitlements.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
 
 type SettingsModule = typeof import('../../utils/settings/settings.js')
@@ -31,6 +32,8 @@ const originalEnv = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   OPENAI_MODEL: process.env.OPENAI_MODEL,
+  OPEN_MATRIX_API_KEY: process.env.OPEN_MATRIX_API_KEY,
+  OPEN_MATRIX_API_BASE_URL: process.env.OPEN_MATRIX_API_BASE_URL,
   ANTHROPIC_CUSTOM_HEADERS: process.env.ANTHROPIC_CUSTOM_HEADERS,
   CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED:
     process.env.CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED,
@@ -189,6 +192,22 @@ beforeEach(async () => {
   await acquireSharedMutationLock('commands/model/model.test.tsx')
   mock.restore()
   settingsForTest = {}
+  clearTokenEntitlementsCache()
+  const commandMock = {
+    builtInCommandNames: new Set<string>(),
+    clearCommandsCache: () => {},
+    findCommand: () => undefined,
+    getCommand: () => undefined,
+    getCommandName: (command: { name?: string }) => command.name ?? '',
+    getCommands: () => [],
+    getMcpSkillCommands: () => [],
+    getSkillToolCommands: () => [],
+    getSlashCommandToolSkills: () => [],
+    hasCommand: () => false,
+    isBridgeSafeCommand: () => false,
+  }
+  mock.module('src/commands.js', () => commandMock)
+  mock.module('src/commands.ts', () => commandMock)
   await mockSettingsForTest()
   scopedLocalOpenAIModelCacheState = undefined
   useSettings({} as SettingsJson)
@@ -211,6 +230,9 @@ afterEach(() => {
     restoreEnv('OPENAI_API_KEY', originalEnv.OPENAI_API_KEY)
     restoreEnv('OPENROUTER_API_KEY', originalEnv.OPENROUTER_API_KEY)
     restoreEnv('OPENAI_MODEL', originalEnv.OPENAI_MODEL)
+    restoreEnv('OPEN_MATRIX_API_KEY', originalEnv.OPEN_MATRIX_API_KEY)
+    restoreEnv('OPEN_MATRIX_API_BASE_URL', originalEnv.OPEN_MATRIX_API_BASE_URL)
+    clearTokenEntitlementsCache()
     restoreEnv('ANTHROPIC_CUSTOM_HEADERS', originalEnv.ANTHROPIC_CUSTOM_HEADERS)
     restoreEnv(
       'CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED',
@@ -247,6 +269,7 @@ async function waitForCondition(
 
 type CapturedModelPickerPropsForTest = {
   discoveryState?: { message?: string; tone?: string }
+  isModelSelectable?: (model: string) => boolean
   onRefresh?: () => void
   optionsOverride?: unknown
 }
@@ -2192,6 +2215,118 @@ test('descriptor model options ignore active profile when route does not match',
   ])
 })
 
+test('/model filters descriptor options to active token entitlements', async () => {
+  process.env.OPEN_MATRIX_API_KEY = 'test-token'
+  process.env.OPEN_MATRIX_API_BASE_URL = 'https://api.example/v1'
+  process.env.CLAUDE_CODE_USE_OPENAI = '1'
+  process.env.OPENAI_BASE_URL = 'https://openrouter.ai/api/v1'
+  process.env.OPENAI_API_KEY = 'sk-openrouter'
+  process.env.OPENAI_MODEL = 'openai/gpt-5-mini'
+
+  globalThis.fetch = mock(async () => new Response(JSON.stringify({
+    models: ['openai/gpt-5-mini'],
+  }), { status: 200 })) as unknown as typeof fetch
+  mockDescriptorDiscovery({
+    cachedModels: [
+      { id: 'allowed', apiName: 'openai/gpt-5-mini' },
+      { id: 'blocked', apiName: 'openai/gpt-5' },
+    ],
+  })
+  mockProviderProfiles()
+
+  const rendered = await renderModelCommandWithCapturedPicker(
+    'descriptor-token-entitlement-filter',
+  )
+  try {
+    expect(rendered.getCapturedProps().discoveryState).toEqual({
+      message: 'Showing models assigned to this API token.',
+      tone: 'info',
+    })
+    expect(rendered.getCapturedProps().optionsOverride).toEqual([
+      expect.objectContaining({ value: 'openai/gpt-5-mini' }),
+    ])
+    expect(rendered.getCapturedProps().isModelSelectable?.('openai/gpt-5-mini')).toBe(true)
+    expect(rendered.getCapturedProps().isModelSelectable?.('openai/gpt-5')).toBe(false)
+  } finally {
+    delete process.env.OPEN_MATRIX_API_KEY
+    delete process.env.OPEN_MATRIX_API_BASE_URL
+    rendered.instance.unmount()
+    rendered.stdout.end()
+  }
+})
+
+test('/model lists assigned token models missing from descriptor cache', async () => {
+  process.env.OPEN_MATRIX_API_KEY = 'test-token'
+  process.env.OPEN_MATRIX_API_BASE_URL = 'https://api.example/v1'
+  process.env.CLAUDE_CODE_USE_OPENAI = '1'
+  process.env.OPENAI_BASE_URL = 'https://openrouter.ai/api/v1'
+  process.env.OPENAI_API_KEY = 'sk-openrouter'
+  process.env.OPENAI_MODEL = 'openai/gpt-5-mini'
+
+  globalThis.fetch = mock(async () => new Response(JSON.stringify({
+    provider: 'openai-codex',
+    models: ['openai/gpt-5-mini', 'cx/gpt-5.5'],
+  }), { status: 200 })) as unknown as typeof fetch
+  mockDescriptorDiscovery({
+    cachedModels: [
+      { id: 'blocked', apiName: 'openai/gpt-5' },
+    ],
+  })
+  mockProviderProfiles()
+
+  const rendered = await renderModelCommandWithCapturedPicker(
+    'descriptor-token-entitlement-missing-cache',
+  )
+  try {
+    expect(rendered.getCapturedProps().optionsOverride).toEqual([
+      expect.objectContaining({ value: 'openai/gpt-5-mini' }),
+      expect.objectContaining({ value: 'cx/gpt-5.5' }),
+    ])
+  } finally {
+    delete process.env.OPEN_MATRIX_API_KEY
+    delete process.env.OPEN_MATRIX_API_BASE_URL
+    rendered.instance.unmount()
+    rendered.stdout.end()
+  }
+})
+
+
+test('/model rejects aliases that resolve to unassigned token models', async () => {
+  process.env.OPEN_MATRIX_API_KEY = 'test-token'
+  process.env.OPEN_MATRIX_API_BASE_URL = 'https://api.example/v1'
+  globalThis.fetch = mock(async () => new Response(JSON.stringify({
+    models: ['kr/claude-opus-4.7'],
+  }), { status: 200 })) as unknown as typeof fetch
+
+  const messages: Array<{ message?: string; display?: string }> = []
+  const { call } = await importFreshModelModule('direct-model-token-entitlement')
+  const element = await call((message, options) => {
+    messages.push({ message, display: options?.display })
+  }, {} as never, 'sonnet')
+  const { AppStateProvider } = await import('../../state/AppState.js')
+  const { render } = await import('../../ink.js')
+  const stdout = new PassThrough()
+  ;(stdout as unknown as { columns: number }).columns = 120
+  const instance = await render(
+    <AppStateProvider>{element}</AppStateProvider>,
+    stdout as unknown as NodeJS.WriteStream,
+  )
+
+  try {
+    await waitForCondition(() => messages.length > 0)
+    expect(messages).toEqual([{
+      message: "Model 'sonnet' resolves to 'cx/gpt-5.5', which is not assigned to this API token.",
+      display: 'system',
+    }])
+  } finally {
+    delete process.env.OPEN_MATRIX_API_KEY
+    delete process.env.OPEN_MATRIX_API_BASE_URL
+    instance.unmount()
+    stdout.end()
+  }
+})
+
+
 test('/model refresh clears descriptor cache and reports updates', async () => {
   process.env.CLAUDE_CODE_USE_OPENAI = '1'
   process.env.OPENAI_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -2545,6 +2680,11 @@ test('interactive model picker refresh keeps descriptor options allowlist-filter
 })
 
 test('interactive model picker rejects models blocked by availableModels before updating state', async () => {
+  delete process.env.ANTHROPIC_API_KEY
+  delete process.env.ANTHROPIC_BASE_URL
+  delete process.env.OPENAI_API_KEY
+  delete process.env.OPENAI_BASE_URL
+  delete process.env.OPEN_MATRIX_API_KEY
   useSettings({ availableModels: ['allowed-model'] } as SettingsJson)
 
   mockProviderProfiles()

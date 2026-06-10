@@ -5,6 +5,7 @@ import {
   configureOpenMatrixProviderProfile,
   getOpenMatrixSetupSummary,
 } from '../../utils/openMatrixGatewayProfile.js'
+import { loadActiveTokenEntitlements } from '../../utils/model/tokenEntitlements.js'
 
 export type OpenMatrixSetupOptions = {
   tokenStdin?: boolean
@@ -51,11 +52,33 @@ async function resolveToken(options: OpenMatrixSetupOptions): Promise<string> {
 
 export async function openMatrixSetupHandler(options: OpenMatrixSetupOptions = {}): Promise<void> {
   const token = await resolveToken(options)
-  const result = configureOpenMatrixProviderProfile(token)
+  const entitlements = await loadActiveTokenEntitlements({
+    forceRefresh: true,
+    tokenOverride: token,
+  })
+
+  if (entitlements.kind === 'error') {
+    throw new Error(entitlements.message)
+  }
+  if (entitlements.kind === 'empty' || entitlements.kind === 'not-applicable') {
+    throw new Error('This API token has no assigned models. Assign at least one model in API panel.')
+  }
+
+  const result = configureOpenMatrixProviderProfile(token, {
+    models: entitlements.models,
+    defaultModel: entitlements.defaultModel,
+  })
   const summary = getOpenMatrixSetupSummary(result.profile)
 
   if (options.json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, created: result.created, ...summary })}\n`)
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      created: result.created,
+      entitlementProvider: entitlements.provider,
+      accountId: entitlements.accountId,
+      assignedModels: entitlements.models,
+      ...summary,
+    })}\n`)
     return
   }
 
@@ -64,10 +87,12 @@ export async function openMatrixSetupHandler(options: OpenMatrixSetupOptions = {
       'Configuracao OPEN MATRIX concluida.',
       `Perfil: ${summary.name}`,
       `Provider: ${summary.provider}`,
+      entitlements.accountId ? `Conta: ${entitlements.accountId}` : undefined,
       `Base URL: ${summary.baseUrl}`,
       `Modelo padrao: ${summary.defaultModel}`,
       `Modelos disponiveis: ${summary.modelCount}`,
+      ...entitlements.models.map(model => `- ${model}`),
       'Use: open-matrix',
-    ].join('\n') + '\n',
+    ].filter(Boolean).join('\n') + '\n',
   )
 }

@@ -40,8 +40,8 @@ export type Props = {
    */
   skipSettingsWrite?: boolean;
   optionsOverride?: ModelOption[];
-  discoveryState?: ModelPickerDiscoveryState;
   onRefresh?: () => void;
+  isModelSelectable?: (model: string) => boolean;
 };
 const NO_PREFERENCE = '__NO_PREFERENCE__';
 function mapDiscoveryToneToColor(tone: ModelPickerDiscoveryState['tone']): 'error' | 'warning' | 'success' | 'subtle' {
@@ -58,7 +58,7 @@ function mapDiscoveryToneToColor(tone: ModelPickerDiscoveryState['tone']): 'erro
   }
 }
 export function ModelPicker(t0) {
-  const $ = _c(83);
+  const $ = _c(91);
   const {
     initial,
     sessionModel,
@@ -70,7 +70,8 @@ export function ModelPicker(t0) {
     skipSettingsWrite,
     optionsOverride,
     discoveryState,
-    onRefresh
+    onRefresh,
+    isModelSelectable
   } = t0;
   const setAppState = useSetAppState();
   const exitState = useExitOnCtrlCDWithKeybindings();
@@ -100,7 +101,7 @@ export function ModelPicker(t0) {
   const modelOptions = optionsOverride ?? t3;
   let t4;
   bb0: {
-    if (initial !== null && isModelAllowed(initial) && !modelOptions.some(opt => opt.value === initial)) {
+    if (initial !== null && isModelAllowed(initial) && (isModelSelectable?.(initial) ?? true) && !modelOptions.some(opt => opt.value === initial)) {
       let t5;
       if ($[4] !== initial) {
         t5 = modelDisplayString(initial);
@@ -242,10 +243,10 @@ export function ModelPicker(t0) {
   }
   useKeybindings(t12, t13);
   let t14;
-  if ($[35] !== effort || $[36] !== hasToggledEffort || $[37] !== onSelect || $[38] !== setAppState || $[39] !== skipSettingsWrite) {
+  if ($[83] !== effort || $[84] !== hasToggledEffort || $[85] !== isModelSelectable || $[86] !== onSelect || $[87] !== setAppState || $[88] !== skipSettingsWrite) {
     t14 = function handleSelect(value_0) {
       const selectedModel = resolveOptionModel(value_0);
-      if (value_0 !== NO_PREFERENCE && selectedModel && !isModelAllowed(selectedModel)) {
+      if (value_0 !== NO_PREFERENCE && selectedModel && (!isModelAllowed(selectedModel) || !(isModelSelectable?.(selectedModel) ?? true))) {
         onSelect(value_0 === NO_PREFERENCE ? null : value_0, undefined);
         return;
       }
@@ -272,18 +273,19 @@ export function ModelPicker(t0) {
       }
       onSelect(value_0, selectedEffort);
     };
-    $[35] = effort;
-    $[36] = hasToggledEffort;
-    $[37] = onSelect;
-    $[38] = setAppState;
-    $[39] = skipSettingsWrite;
-    $[40] = t14;
+    $[83] = effort;
+    $[84] = hasToggledEffort;
+    $[85] = isModelSelectable;
+    $[86] = onSelect;
+    $[87] = setAppState;
+    $[88] = skipSettingsWrite;
+    $[89] = t14;
   } else {
-    t14 = $[40];
+    t14 = $[89];
   }
   const handleSelect = t14;
   let t15;
-  if ($[41] === Symbol.for("react.memo_cache_sentinel")) {
+  if ($[42] === Symbol.for("react.memo_cache_sentinel")) {
     t15 = <Text color="remember" bold={true}>Select model</Text>;
     $[41] = t15;
   } else {

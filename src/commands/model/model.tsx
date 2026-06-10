@@ -52,6 +52,7 @@ import {
 } from '../../utils/model/check1mAccess.js'
 import {
   getDefaultOptionForUser,
+  getModelOptions,
   type ModelOption,
 } from '../../utils/model/modelOptions.js'
 import { buildRouteCatalogModelOptions, mergeRouteCatalogEntries } from '../../utils/model/routeCatalogOptions.js'
@@ -59,9 +60,17 @@ import { discoverOpenAICompatibleModelOptions } from '../../utils/model/openaiMo
 import {
   getDefaultMainLoopModelSetting,
   isOpus1mMergeEnabled,
+  parseUserSpecifiedModel,
   renderDefaultModelSetting,
 } from '../../utils/model/model.js'
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js'
+import {
+  filterOptionsByTokenEntitlements,
+  hasActiveTokenEntitlementGate,
+  isModelAllowedByTokenEntitlements,
+  loadActiveTokenEntitlements,
+  type TokenEntitlementStatus,
+} from '../../utils/model/tokenEntitlements.js'
 import { validateModel } from '../../utils/model/validateModel.js'
 import { getLocalOpenAICompatibleProviderLabel } from '../../utils/providerDiscovery.js'
 import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
@@ -90,6 +99,7 @@ type ModelDiscoveryContext =
       routeId: string
       routeDefaultModel?: string
       routeLabel: string
+      tokenEntitlements?: TokenEntitlementStatus
     }
   | {
       kind: 'legacy-openai'
@@ -100,6 +110,7 @@ type ModelDiscoveryContext =
       profileModelSurface: ResolvedProviderProfileModelSurface
       routeId: string
       routeLabel: string
+      tokenEntitlements?: TokenEntitlementStatus
     }
 
 function renderModelLabel(model: string | null): string {
@@ -135,6 +146,103 @@ function filterModelOptionsByAllowlist(options: ModelOption[]): ModelOption[] {
       ? isModelAllowed(option.value)
       : true
   })
+}
+
+function getTokenEntitlementDiscoveryState(
+  status: TokenEntitlementStatus,
+): ModelPickerDiscoveryState | undefined {
+  switch (status.kind) {
+    case 'loaded':
+      return {
+        message: 'Showing models assigned to this API token.',
+        tone: 'info',
+      }
+    case 'empty':
+      return {
+        message: 'This API token has no assigned models.',
+        tone: 'warning',
+      }
+    case 'error':
+      return status.managedToken
+        ? { message: status.message, tone: 'error' }
+        : undefined
+    case 'not-applicable':
+      return undefined
+  }
+}
+
+function getTokenEntitlementModelOptions(
+  status: TokenEntitlementStatus,
+): ModelOption[] {
+  if (status.kind !== 'loaded') {
+    return []
+  }
+
+  return status.models.map(model => ({
+    value: model,
+    label: model,
+    description: status.provider
+      ? `Assigned to this API token · Provider: ${status.provider}`
+      : 'Assigned to this API token',
+  }))
+}
+
+function mergeTokenEntitlementModelOptions(
+  options: ModelOption[],
+  entitlementOptions: ModelOption[],
+): ModelOption[] {
+  const seen = new Set<string>()
+  const merged: ModelOption[] = []
+
+  for (const option of [...options, ...entitlementOptions]) {
+    const key = modelOptionKey(option)
+    if (key && seen.has(key)) {
+      continue
+    }
+    if (key) {
+      seen.add(key)
+    }
+    merged.push(option)
+  }
+
+  return merged
+}
+
+function applyTokenEntitlementPolicy(
+  options: ModelOption[],
+  status: TokenEntitlementStatus,
+): ModelOption[] {
+  if (!hasActiveTokenEntitlementGate(status)) {
+    return options
+  }
+
+  return filterOptionsByTokenEntitlements(
+    mergeTokenEntitlementModelOptions(options, getTokenEntitlementModelOptions(status)),
+    status,
+  )
+}
+
+function getTokenEntitlementRejectionMessage(
+  model: string,
+  status: TokenEntitlementStatus | undefined,
+): string | null {
+  if (!status || !hasActiveTokenEntitlementGate(status)) {
+    return null
+  }
+  const target = parseUserSpecifiedModel(model)
+  const allowed = isModelAllowedByTokenEntitlements(target, status)
+  if (allowed === true || allowed === 'not-applicable') {
+    return null
+  }
+  if (status.kind === 'error') {
+    return status.message
+  }
+  if (status.kind === 'empty') {
+    return 'This API token has no assigned models.'
+  }
+  return target === model
+    ? `Model '${model}' is not assigned to this API token.`
+    : `Model '${model}' resolves to '${target}', which is not assigned to this API token.`
 }
 
 function modelOptionKey(option: ModelOption): string | null {
@@ -295,7 +403,7 @@ function getLegacyOpenAIOptionsOverride(options: {
   profileModelSurface: ResolvedProviderProfileModelSurface
   routeId: string
 }): ModelOption[] {
-  const scopedOptions = getActiveOpenAIRouteModelOptionsCache()
+  const scopedOptions = getActiveOpenAIRouteModelOptionsCache() ?? []
   const activeProfile = getActiveProviderProfile()
   if (
     !activeProfile ||
@@ -361,6 +469,7 @@ export function shouldAutoRefreshRouteCatalog(options: {
 
 async function loadDescriptorDiscoveryContext(
   routeId: string,
+  tokenEntitlements: TokenEntitlementStatus,
 ): Promise<ModelDiscoveryContext | null> {
   const descriptor = getRouteDescriptor(routeId)
   const catalog = descriptor?.catalog
@@ -398,17 +507,23 @@ async function loadDescriptorDiscoveryContext(
       routeDefaultModel,
     )
 
+    const optionsOverride = applyTokenEntitlementPolicy(
+      mergeActiveProfileModelOptions(routeId, routeOptions, {
+        profileModelSurface,
+      }),
+      tokenEntitlements,
+    )
+
     return {
       kind: 'descriptor',
       autoRefresh: false,
       canRefresh,
       profileModelSurface,
-      optionsOverride: mergeActiveProfileModelOptions(routeId, routeOptions, {
-        profileModelSurface,
-      }),
+      optionsOverride,
       routeId,
       routeDefaultModel,
       routeLabel,
+      tokenEntitlements,
     }
   }
 
@@ -448,25 +563,36 @@ async function loadDescriptorDiscoveryContext(
     routeDefaultModel,
   )
 
+  const optionsOverride = applyTokenEntitlementPolicy(
+    mergeActiveProfileModelOptions(routeId, routeOptions, {
+      profileModelSurface,
+    }),
+    tokenEntitlements,
+  )
+
   return {
     kind: 'descriptor',
     autoRefresh,
     canRefresh,
-    discoveryState,
+    discoveryState: getTokenEntitlementDiscoveryState(tokenEntitlements) ?? discoveryState,
     profileModelSurface,
-    optionsOverride: mergeActiveProfileModelOptions(routeId, routeOptions, {
-      profileModelSurface,
-    }),
+    optionsOverride,
     routeId,
     routeDefaultModel,
     routeLabel,
+    tokenEntitlements,
   }
 }
 
-async function loadModelDiscoveryContext(): Promise<ModelDiscoveryContext | null> {
+async function loadModelDiscoveryContext(
+  options: { forceRefreshEntitlements?: boolean } = {},
+): Promise<ModelDiscoveryContext | null> {
+  const tokenEntitlements = await loadActiveTokenEntitlements({
+    forceRefresh: options.forceRefreshEntitlements,
+  })
   const routeId = getActiveRouteId()
   if (routeId && routeId !== 'anthropic') {
-    const descriptorContext = await loadDescriptorDiscoveryContext(routeId)
+    const descriptorContext = await loadDescriptorDiscoveryContext(routeId, tokenEntitlements)
     if (descriptorContext) {
       return descriptorContext
     }
@@ -481,17 +607,24 @@ async function loadModelDiscoveryContext(): Promise<ModelDiscoveryContext | null
       routeId: legacyRouteId,
       settingsMode: getProviderProfileModelPickerMode(),
     })
+    const optionsOverride = applyTokenEntitlementPolicy(
+      getLegacyOpenAIOptionsOverride({
+        profileModelSurface,
+        routeId: legacyRouteId,
+      }),
+      tokenEntitlements,
+    )
+
     return {
       kind: 'legacy-openai',
       autoRefresh: !isEssentialTrafficOnly(),
       canRefresh: !isEssentialTrafficOnly(),
-      optionsOverride: getLegacyOpenAIOptionsOverride({
-        profileModelSurface,
-        routeId: legacyRouteId,
-      }),
+      discoveryState: getTokenEntitlementDiscoveryState(tokenEntitlements),
+      optionsOverride,
       profileModelSurface,
       routeId: legacyRouteId,
       routeLabel: getLocalOpenAICompatibleProviderLabel(baseUrl),
+      tokenEntitlements,
     }
   }
 
@@ -578,9 +711,15 @@ function legacyDiscoveryStateForOptions(options: {
 
 function ModelPickerWrapper({
   discoveryContext,
+  fallbackDiscoveryState,
+  fallbackOptionsOverride,
+  fallbackTokenEntitlements,
   onDone,
 }: {
   discoveryContext: ModelDiscoveryContext | null
+  fallbackDiscoveryState?: ModelPickerDiscoveryState
+  fallbackOptionsOverride?: ModelOption[]
+  fallbackTokenEntitlements?: TokenEntitlementStatus
   onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void
 }) {
   const mainLoopModel = useAppState((s: AppState) => s.mainLoopModel)
@@ -592,11 +731,11 @@ function ModelPickerWrapper({
   const [optionsOverride, setOptionsOverride] = React.useState<ModelOption[] | undefined>(
     discoveryContext && 'optionsOverride' in discoveryContext
       ? discoveryContext.optionsOverride
-      : undefined,
+      : fallbackOptionsOverride,
   )
   const [discoveryState, setDiscoveryState] =
     React.useState<ModelPickerDiscoveryState | undefined>(
-      discoveryContext?.discoveryState,
+      discoveryContext?.discoveryState ?? fallbackDiscoveryState,
     )
 
   const handleCancel = () => {
@@ -609,6 +748,17 @@ function ModelPickerWrapper({
   }
 
   const handleSelect = (model: string | null, effort: EffortLevel | undefined) => {
+    if (model) {
+      const tokenMessage = getTokenEntitlementRejectionMessage(
+        model,
+        discoveryContext?.tokenEntitlements ?? fallbackTokenEntitlements,
+      )
+      if (tokenMessage) {
+        onDone(tokenMessage, { display: 'system' })
+        return
+      }
+    }
+
     if (model && !isModelAllowed(model)) {
       onDone(
         `Model '${model}' is not available. Your organization restricts model selection.`,
@@ -699,27 +849,34 @@ function ModelPickerWrapper({
         },
       )
 
-      const nextOptions = mergeActiveProfileModelOptions(
-        discoveryContext.routeId,
-        buildRouteCatalogModelOptions(
-          discoveryContext.routeLabel,
-          result?.models ?? [],
-          discoveryContext.routeDefaultModel,
+      const nextOptions = applyTokenEntitlementPolicy(
+        mergeActiveProfileModelOptions(
+          discoveryContext.routeId,
+          buildRouteCatalogModelOptions(
+            discoveryContext.routeLabel,
+            result?.models ?? [],
+            discoveryContext.routeDefaultModel,
+          ),
+          {
+            profileModelSurface: discoveryContext.profileModelSurface,
+          },
         ),
-        {
-          profileModelSurface: discoveryContext.profileModelSurface,
-        },
+        discoveryContext.tokenEntitlements ?? { kind: 'not-applicable' },
       )
       const changed = !haveSameModelOptions(optionsOverride ?? [], nextOptions)
 
       setOptionsOverride(nextOptions)
+      const entitlementState = getTokenEntitlementDiscoveryState(
+        discoveryContext.tokenEntitlements ?? { kind: 'not-applicable' },
+      )
       setDiscoveryState(
-        descriptorDiscoveryStateForResult({
-          changed,
-          manual,
-          result,
-          routeLabel: discoveryContext.routeLabel,
-        }),
+        entitlementState ??
+          descriptorDiscoveryStateForResult({
+            changed,
+            manual,
+            result,
+            routeLabel: discoveryContext.routeLabel,
+          }),
       )
       return
     }
@@ -747,7 +904,7 @@ function ModelPickerWrapper({
             discoveryContext.routeId,
           ),
       )
-      const nextOptions = profileApplied
+      const rawNextOptions = profileApplied
         ? mergeActiveProfileModelOptions(
             discoveryContext.routeId,
             discoveredOptions,
@@ -759,6 +916,10 @@ function ModelPickerWrapper({
             getDefaultOptionForUser(),
             ...discoveredOptions,
           ])
+      const nextOptions = applyTokenEntitlementPolicy(
+        rawNextOptions,
+        discoveryContext.tokenEntitlements ?? { kind: 'not-applicable' },
+      )
       const changed =
         !haveSameModelOptions(optionsOverride ?? currentRawOptions, nextOptions)
       const rawChanged =
@@ -772,12 +933,16 @@ function ModelPickerWrapper({
       }
       setOptionsOverride(nextOptions)
 
+      const entitlementState = getTokenEntitlementDiscoveryState(
+        discoveryContext.tokenEntitlements ?? { kind: 'not-applicable' },
+      )
       setDiscoveryState(
-        legacyDiscoveryStateForOptions({
-          changed,
-          manual,
-          routeLabel: discoveryContext.routeLabel,
-        }),
+        entitlementState ??
+          legacyDiscoveryStateForOptions({
+            changed,
+            manual,
+            routeLabel: discoveryContext.routeLabel,
+          }),
       )
     } catch {
       setDiscoveryState(
@@ -816,6 +981,12 @@ function ModelPickerWrapper({
       }
       optionsOverride={optionsOverride}
       discoveryState={discoveryState}
+      isModelSelectable={model =>
+        !getTokenEntitlementRejectionMessage(
+          model,
+          discoveryContext?.tokenEntitlements ?? fallbackTokenEntitlements,
+        )
+      }
       onRefresh={
         discoveryContext?.canRefresh
           ? () => {
@@ -840,6 +1011,18 @@ function SetModelAndClose({
 
   React.useEffect(() => {
     async function handleModelChange(): Promise<void> {
+      const tokenEntitlements = await loadActiveTokenEntitlements()
+      if (model) {
+        const tokenMessage = getTokenEntitlementRejectionMessage(
+          model,
+          tokenEntitlements,
+        )
+        if (tokenMessage) {
+          onDone(tokenMessage, { display: 'system' })
+          return
+        }
+      }
+
       if (model && !isModelAllowed(model)) {
         onDone(
           `Model '${model}' is not available. Your organization restricts model selection.`,
@@ -992,7 +1175,9 @@ function ShowModelAndClose({
 }
 
 async function refreshModelsAndSummarize(): Promise<string> {
-  const discoveryContext = await loadModelDiscoveryContext()
+  const discoveryContext = await loadModelDiscoveryContext({
+    forceRefreshEntitlements: true,
+  })
 
   if (!discoveryContext) {
     return 'The active provider does not support runtime model discovery refresh.'
@@ -1015,16 +1200,19 @@ async function refreshModelsAndSummarize(): Promise<string> {
       ...getOpenAIDiscoveryRequestOptions(discoveryContext.routeId),
       forceRefresh: true,
     })
-    const nextOptions = mergeActiveProfileModelOptions(
-      discoveryContext.routeId,
-      buildRouteCatalogModelOptions(
-        discoveryContext.routeLabel,
-        result?.models ?? [],
-        discoveryContext.routeDefaultModel,
+    const nextOptions = applyTokenEntitlementPolicy(
+      mergeActiveProfileModelOptions(
+        discoveryContext.routeId,
+        buildRouteCatalogModelOptions(
+          discoveryContext.routeLabel,
+          result?.models ?? [],
+          discoveryContext.routeDefaultModel,
+        ),
+        {
+          profileModelSurface: discoveryContext.profileModelSurface,
+        },
       ),
-      {
-        profileModelSurface: discoveryContext.profileModelSurface,
-      },
+      discoveryContext.tokenEntitlements ?? { kind: 'not-applicable' },
     )
     const changed = !haveSameModelOptions(
       discoveryContext.optionsOverride,
@@ -1056,7 +1244,7 @@ async function refreshModelsAndSummarize(): Promise<string> {
       activeProfile &&
         isActiveProfileAppliedToRoute(activeProfile, discoveryContext.routeId),
     )
-    const nextOptions = profileApplied
+    const rawNextOptions = profileApplied
       ? mergeActiveProfileModelOptions(
           discoveryContext.routeId,
           discoveredOptions,
@@ -1068,6 +1256,10 @@ async function refreshModelsAndSummarize(): Promise<string> {
           getDefaultOptionForUser(),
           ...discoveredOptions,
         ])
+    const nextOptions = applyTokenEntitlementPolicy(
+      rawNextOptions,
+      discoveryContext.tokenEntitlements ?? { kind: 'not-applicable' },
+    )
     const changed =
       !haveSameModelOptions(
         discoveryContext.optionsOverride ?? currentRawOptions,
@@ -1133,5 +1325,25 @@ export const call: LocalJSXCommandCall = async (onDone, _context, args) => {
   }
 
   const discoveryContext = await loadModelDiscoveryContext()
-  return <ModelPickerWrapper discoveryContext={discoveryContext} onDone={onDone} />
+  if (discoveryContext) {
+    return <ModelPickerWrapper discoveryContext={discoveryContext} onDone={onDone} />
+  }
+
+  const fallbackTokenEntitlements = await loadActiveTokenEntitlements()
+  const fallbackOptionsOverride = hasActiveTokenEntitlementGate(fallbackTokenEntitlements)
+    ? applyTokenEntitlementPolicy(getModelOptions(), fallbackTokenEntitlements)
+    : undefined
+  const fallbackDiscoveryState = getTokenEntitlementDiscoveryState(
+    fallbackTokenEntitlements,
+  )
+
+  return (
+    <ModelPickerWrapper
+      discoveryContext={null}
+      fallbackDiscoveryState={fallbackDiscoveryState}
+      fallbackOptionsOverride={fallbackOptionsOverride}
+      fallbackTokenEntitlements={fallbackTokenEntitlements}
+      onDone={onDone}
+    />
+  )
 }
