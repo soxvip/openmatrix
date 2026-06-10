@@ -3864,7 +3864,6 @@ async function run(): Promise<CommanderCommand> {
         tokenStdin: Boolean(options.tokenStdin),
         json: Boolean(options.json),
       })
-      process.exit(0)
     })
 
   // claude mcp
