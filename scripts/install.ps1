@@ -223,8 +223,14 @@ if ([string]::IsNullOrWhiteSpace($token)) {
 }
 
 Write-Host 'Configurando provider OPEN MATRIX...'
-$setupOutput = $token | & $openMatrixCommand.Source setup --token-stdin 2>&1
-$setupExitCode = $LASTEXITCODE
+$previousOpenMatrixApiKey = $env:OPEN_MATRIX_API_KEY
+try {
+  $env:OPEN_MATRIX_API_KEY = $token
+  $setupOutput = & $openMatrixCommand.Source setup 2>&1
+  $setupExitCode = $LASTEXITCODE
+} finally {
+  $env:OPEN_MATRIX_API_KEY = $previousOpenMatrixApiKey
+}
 if ($setupExitCode -ne 0) {
   if ($setupOutput) {
     Write-Host ($setupOutput -join [Environment]::NewLine)
