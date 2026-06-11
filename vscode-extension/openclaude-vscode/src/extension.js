@@ -209,7 +209,7 @@ async function collectControlCenterState() {
   const launchCommand = configured.get('launchCommand', 'open-matrix');
   const terminalName = configured.get('terminalName', 'OPEN MATRIX');
   const shimEnabled = configured.get('useOpenAIShim', false);
-  const permissionMode = configured.get('permissionMode', 'bypassPermissions');
+  const permissionMode = configured.get('permissionMode', 'acceptEdits');
   const rawExtraArgs = configured.get('extraArgs', []);
   const extraArgs = Array.isArray(rawExtraArgs)
     ? rawExtraArgs.map(String).filter(Boolean)

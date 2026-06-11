@@ -8,7 +8,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { ProcessManager } = require('./processManager');
+const { spawn } = require('child_process');
+const { ProcessManager, withNodeOnPath, withPdfToolPath, resolveDirectInvocation } = require('./processManager');
+const { SessionManager } = require('./sessionManager');
 const { buildPermissionControlResult } = require('./permissionResponse');
 const { toViewModel } = require('./messageParser');
 const { renderChatHtml } = require('./chatRenderer');
@@ -84,6 +86,77 @@ async function pickFilesForWebview(webview) {
     }
   } catch (err) {
     webview.postMessage({ type: 'attachments_error', message: err && err.message ? err.message : String(err) });
+  }
+}
+
+const ENHANCE_INSTRUCTION = [
+  'Voce e um assistente que MELHORA prompts para um agente de programacao.',
+  'Reescreva o texto do usuario de forma mais clara, especifica e acionavel,',
+  'mantendo SEMPRE a intencao e o idioma original. Nao execute o pedido, apenas',
+  'reescreva o prompt. Nao adicione preambulo, explicacao, aspas ou marcadores.',
+  'Responda APENAS com o prompt melhorado, em texto puro.',
+  '',
+  'Prompt do usuario:',
+].join('\n');
+
+// Run a one-shot CLI query to rewrite the user's draft prompt. Reuses the same
+// launch command/cwd/env as the chat, and the SAME robust invocation as the
+// chat process (direct node.exe + entry on Windows, PATH fixups) so it does not
+// fail with ENOENT when the npm global shim/PATH is not visible to the host.
+async function enhancePromptForWebview(webview, text) {
+  const draft = String(text || '').trim();
+  if (!draft) {
+    webview.postMessage({ type: 'enhance_prompt_error', message: 'Digite um prompt antes de melhorar.' });
+    return;
+  }
+  const { command, cwd, env } = getLaunchConfig();
+  const args = ['--print', '--output-format=text', `${ENHANCE_INSTRUCTION}\n${draft}`];
+  const spawnEnv = withNodeOnPath(withPdfToolPath({ ...process.env, ...env }));
+  const isWin = process.platform === 'win32';
+
+  let file = command;
+  let spawnArgs = args;
+  let useShell = false;
+  if (isWin) {
+    const direct = resolveDirectInvocation(command);
+    if (direct) {
+      file = direct.node;
+      spawnArgs = [direct.entry, ...args];
+    } else {
+      // Fall back to a shell so the .cmd shim resolves like in a terminal.
+      useShell = true;
+    }
+  }
+
+  try {
+    const improved = await new Promise((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      let child;
+      try {
+        child = spawn(file, spawnArgs, { cwd, env: spawnEnv, shell: useShell, windowsHide: true });
+      } catch (e) {
+        reject(e);
+        return;
+      }
+      child.stdout.on('data', (d) => { stdout += d.toString(); });
+      child.stderr.on('data', (d) => { stderr += d.toString(); });
+      child.on('error', (e) => reject(e));
+      child.on('close', (code) => {
+        if (code !== 0 && !stdout.trim()) {
+          reject(new Error(stderr.trim() || ('A CLI saiu com codigo ' + code)));
+          return;
+        }
+        resolve(stdout.trim());
+      });
+    });
+    if (!improved) {
+      webview.postMessage({ type: 'enhance_prompt_error', message: 'Nao foi possivel melhorar o prompt.' });
+      return;
+    }
+    webview.postMessage({ type: 'enhance_prompt_result', text: improved });
+  } catch (err) {
+    webview.postMessage({ type: 'enhance_prompt_error', message: err && err.message ? err.message : String(err) });
   }
 }
 
@@ -179,7 +252,7 @@ function getLaunchConfig() {
   const cfg = vscode.workspace.getConfiguration('openmatrix');
   const command = cfg.get('launchCommand', 'open-matrix');
   const shimEnabled = cfg.get('useOpenAIShim', false);
-  const permissionMode = cfg.get('permissionMode', 'bypassPermissions');
+  const permissionMode = cfg.get('permissionMode', 'acceptEdits');
   const rawExtraArgs = cfg.get('extraArgs', []);
   const extraArgs = Array.isArray(rawExtraArgs)
     ? rawExtraArgs.map(String).filter(Boolean)
@@ -255,6 +328,23 @@ class ChatController {
     this.broadcast(msg);
   }
 
+  // Find a stored toolUse by id (searching from the most recent assistant
+  // message backwards) and merge in the given fields. Keeps the persisted
+  // history in sync with live tool_result / tool_progress events so restored
+  // tabs reflect the final tool state.
+  _updateStoredToolUse(toolUseId, fields) {
+    if (!toolUseId) return;
+    for (let i = this._messages.length - 1; i >= 0; i--) {
+      const m = this._messages[i];
+      if (!m || !Array.isArray(m.toolUses)) continue;
+      const tu = m.toolUses.find(t => t && t.id === toolUseId);
+      if (tu) {
+        Object.assign(tu, fields);
+        return;
+      }
+    }
+  }
+
   async startSession(opts = {}) {
     this.stopSession();
     this._accumulatedText = '';
@@ -270,7 +360,7 @@ class ChatController {
 
     const launchConfig = getLaunchConfig();
     const { command, cwd, env, extraArgs, appendSystemPrompt } = launchConfig;
-    const permissionMode = opts.permissionMode || this._permissionModeOverride || launchConfig.permissionMode || 'bypassPermissions';
+    const permissionMode = opts.permissionMode || this._permissionModeOverride || launchConfig.permissionMode || 'acceptEdits';
 
     this._process = new ProcessManager({
       command,
@@ -337,7 +427,7 @@ class ChatController {
   }
 
   getPowerState(permissionMode = null) {
-    const mode = permissionMode || this._permissionModeOverride || getLaunchConfig().permissionMode || 'bypassPermissions';
+    const mode = permissionMode || this._permissionModeOverride || getLaunchConfig().permissionMode || 'acceptEdits';
     const label = mode === 'bypassPermissions'
       ? 'Poder total'
       : mode === 'plan'
@@ -593,11 +683,20 @@ class ChatController {
               : Array.isArray(block.content)
                 ? block.content.map(b => b.text || '').join('')
                 : '';
+            const output = resultText.slice(0, 2000) || '(concluido)';
+            const isError = block.is_error || false;
+            // Persist the result onto the stored toolUse so restored tabs show
+            // the final state instead of being stuck on "Executando...".
+            this._updateStoredToolUse(block.tool_use_id, {
+              status: isError ? 'error' : 'complete',
+              result: output,
+              isError,
+            });
             this._broadcast({
               type: 'tool_result',
               toolUseId: block.tool_use_id,
-              content: resultText.slice(0, 2000) || '(concluido)',
-              isError: block.is_error || false,
+              content: output,
+              isError,
             });
           }
         }
@@ -621,6 +720,16 @@ class ChatController {
             : '';
       const alreadyDisplayed = this._turnSawAssistantMessage || this._turnHadStreamDelta;
       const text = this._accumulatedText || (alreadyDisplayed ? '' : resultText) || '';
+      // Persist the final usage onto the last assistant message so a restored
+      // tab shows the real token counts instead of "0 entrada / 0 saida".
+      if (msg.usage) {
+        for (let i = this._messages.length - 1; i >= 0; i--) {
+          if (this._messages[i].role === 'assistant') {
+            this._messages[i].usage = msg.usage;
+            break;
+          }
+        }
+      }
       this._broadcast({ type: 'stream_end', text, usage: msg.usage || null, final: true });
       // Show turn info: if the model stopped without using tools (num_turns=1),
       // the user knows the model chose not to edit
@@ -645,6 +754,7 @@ class ChatController {
 
     if (isToolProgressMessage(msg)) {
       const vm = toViewModel(msg)[0];
+      this._updateStoredToolUse(vm.toolUseId, { result: vm.content });
       this._broadcast({
         type: 'tool_progress',
         toolUseId: vm.toolUseId,
@@ -933,6 +1043,18 @@ class OpenMatrixChatViewProvider {
       if (this._webviewView === webviewView) this._webviewView = null;
     });
 
+    // A hidden WebviewView does not reliably receive postMessage updates, and
+    // VS Code does not replay them when it becomes visible again. Without this,
+    // streaming updates sent while the sidebar was hidden never render until the
+    // user forces a refresh (e.g. switching tabs). On re-show, re-sync the tab
+    // bar and restore the active tab's messages so the UI reflects live state.
+    webviewView.onDidChangeVisibility(() => {
+      if (!webviewView.visible) return;
+      this._tabs._broadcastTabs();
+      const active = this._tabs.getActive();
+      if (active) this._restoreMessagesFor(webview, active.tabId);
+    });
+
     webview.html = this._getHtml(webview);
     this._attachMessageHandler(webview);
   }
@@ -953,6 +1075,9 @@ class OpenMatrixChatViewProvider {
         }
         case 'pick_files':
           await pickFilesForWebview(webview);
+          break;
+        case 'enhance_prompt':
+          await enhancePromptForWebview(webview, msg.text);
           break;
         case 'paste_files':
           await savePastedFilesForWebview(webview, msg.files);
@@ -1013,6 +1138,7 @@ class OpenMatrixChatViewProvider {
           break;
         case 'webview_ready':
           this._tabs._broadcastTabs();
+          this._sendSessionList(webview);
           break;
       }
     });
@@ -1020,9 +1146,23 @@ class OpenMatrixChatViewProvider {
 
   async _sendSessionList(webview) {
     const ctl = this._tabs.getActive();
-    if (!ctl || !ctl.sessionManager) return;
+    let sessionManager = ctl && ctl.sessionManager;
+    // Fallback: on first webview load the active controller may not be ready
+    // yet. Listing sessions only reads JSONL files from disk, so we can use a
+    // temporary SessionManager seeded with the workspace cwd.
+    if (!sessionManager) {
+      try {
+        const folders = vscode.workspace.workspaceFolders;
+        const cwd = folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
+        sessionManager = new SessionManager();
+        if (cwd) sessionManager.setCwd(cwd);
+      } catch {
+        webview.postMessage({ type: 'session_list', sessions: [] });
+        return;
+      }
+    }
     try {
-      const sessions = await ctl.sessionManager.listSessions();
+      const sessions = await sessionManager.listSessions();
       webview.postMessage({ type: 'session_list', sessions });
     } catch {
       webview.postMessage({ type: 'session_list', sessions: [] });
@@ -1110,6 +1250,9 @@ class OpenMatrixChatPanelManager {
         case 'pick_files':
           await pickFilesForWebview(webview);
           break;
+        case 'enhance_prompt':
+          await enhancePromptForWebview(webview, msg.text);
+          break;
         case 'paste_files':
           await savePastedFilesForWebview(webview, msg.files);
           break;
@@ -1169,6 +1312,7 @@ class OpenMatrixChatPanelManager {
           break;
         case 'webview_ready':
           this._tabs._broadcastTabs();
+          this._sendSessionList(webview);
           break;
       }
     });
@@ -1176,9 +1320,23 @@ class OpenMatrixChatPanelManager {
 
   async _sendSessionList(webview) {
     const ctl = this._tabs.getActive();
-    if (!ctl || !ctl.sessionManager) return;
+    let sessionManager = ctl && ctl.sessionManager;
+    // Fallback: on first webview load the active controller may not be ready
+    // yet. Listing sessions only reads JSONL files from disk, so we can use a
+    // temporary SessionManager seeded with the workspace cwd.
+    if (!sessionManager) {
+      try {
+        const folders = vscode.workspace.workspaceFolders;
+        const cwd = folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
+        sessionManager = new SessionManager();
+        if (cwd) sessionManager.setCwd(cwd);
+      } catch {
+        webview.postMessage({ type: 'session_list', sessions: [] });
+        return;
+      }
+    }
     try {
-      const sessions = await ctl.sessionManager.listSessions();
+      const sessions = await sessionManager.listSessions();
       webview.postMessage({ type: 'session_list', sessions });
     } catch {
       webview.postMessage({ type: 'session_list', sessions: [] });

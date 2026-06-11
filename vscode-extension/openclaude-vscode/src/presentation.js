@@ -97,7 +97,7 @@ function getPowerTone(permissionMode) {
 }
 
 function getPowerDetail(status = {}) {
-  const permissionMode = status.permissionMode || 'bypassPermissions';
+  const permissionMode = status.permissionMode || 'acceptEdits';
   const extra = Array.isArray(status.extraArgs) && status.extraArgs.length > 0
     ? ` - extra: ${status.extraArgs.join(' ')}`
     : '';
@@ -131,7 +131,7 @@ function buildControlCenterViewModel(status = {}) {
   const providerDetail = 'Modelo oculto';
   const providerTone = getProviderTone(status.providerState);
   const providerSummary = status.providerState?.label ? 'IA configurada' : 'Desconhecido';
-  const permissionMode = status.permissionMode || 'bypassPermissions';
+  const permissionMode = status.permissionMode || 'acceptEdits';
   const powerSummary = getPowerSummary(permissionMode);
   const powerDetail = getPowerDetail(status);
   const workspaceSummary = status.workspaceFolder ? getPathTail(status.workspaceFolder) : 'Nenhum espaço de trabalho aberto';

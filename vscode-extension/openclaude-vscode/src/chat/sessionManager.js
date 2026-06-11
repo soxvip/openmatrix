@@ -13,6 +13,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const readline = require('readline');
 
 const MAX_SANITIZED_LENGTH = 80;
 
@@ -160,10 +161,33 @@ class SessionManager {
     if (firstTimestamp) timestamp = firstTimestamp;
     const timeLabel = formatRelativeTime(timestamp);
 
+    // Capture the LAST user request so the history item shows where the
+    // conversation left off. Reading just the tail is fast, but a single JSONL
+    // line (an assistant turn with large tool results) can be hundreds of KB,
+    // so a fixed tail window may contain no user message. Read a generous tail
+    // first; if no user message is found, fall back to a full streaming scan.
+    let lastMessage = '';
+    try {
+      const tail = await this._readTail(filePath, 262144, stat.size);
+      const tailLines = tail.split('\n').filter(Boolean);
+      for (let i = tailLines.length - 1; i >= 0; i--) {
+        try {
+          const text = extractUserText(JSON.parse(tailLines[i]));
+          if (text) { lastMessage = text; break; }
+        } catch { /* skip bad line */ }
+      }
+      // The tail may start mid-line; if it didn't cover the whole file and we
+      // found nothing, scan the full file line-by-line (memory-friendly).
+      if (!lastMessage && stat.size > 262144) {
+        lastMessage = await this._findLastUserMessage(filePath);
+      }
+    } catch { /* read failed, leave lastMessage empty */ }
+
     return {
       id: sessionId,
       title: title || preview.slice(0, 60) || 'Untitled session',
       preview: preview || '',
+      lastMessage,
       timestamp,
       timeLabel,
       filePath,
@@ -263,6 +287,58 @@ class SessionManager {
       await fd.close();
     }
   }
+
+  async _readTail(filePath, bytes, fileSize) {
+    const fd = await fsp.open(filePath, 'r');
+    try {
+      const size = typeof fileSize === 'number' ? fileSize : (await fd.stat()).size;
+      const start = Math.max(0, size - bytes);
+      const len = size - start;
+      const buf = Buffer.alloc(len);
+      const { bytesRead } = await fd.read(buf, 0, len, start);
+      return buf.slice(0, bytesRead).toString('utf8');
+    } finally {
+      await fd.close();
+    }
+  }
+
+  // Stream the whole file line-by-line to find the last user message. Used as a
+  // fallback when the tail window contains no user message (e.g. very large
+  // assistant turns). Memory-friendly: keeps only the latest match.
+  async _findLastUserMessage(filePath) {
+    return new Promise((resolve) => {
+      let last = '';
+      let stream;
+      try {
+        stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+      } catch {
+        resolve('');
+        return;
+      }
+      const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      rl.on('line', (line) => {
+        if (!line) return;
+        try {
+          const text = extractUserText(JSON.parse(line));
+          if (text) last = text;
+        } catch { /* skip bad line */ }
+      });
+      rl.on('close', () => resolve(last));
+      rl.on('error', () => resolve(last));
+      stream.on('error', () => { try { rl.close(); } catch {} resolve(last); });
+    });
+  }
+}
+
+function extractUserText(entry) {
+  if (!entry || entry.type !== 'user' || !entry.message) return '';
+  const content = entry.message.content;
+  if (typeof content === 'string') return content.slice(0, 120);
+  if (Array.isArray(content)) {
+    const textBlock = content.find(b => b.type === 'text');
+    return textBlock ? (textBlock.text || '').slice(0, 120) : '';
+  }
+  return '';
 }
 
 function formatRelativeTime(ts) {

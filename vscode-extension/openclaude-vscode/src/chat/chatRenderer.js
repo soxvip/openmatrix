@@ -689,6 +689,25 @@ function renderChatHtml({ nonce, platform }) {
     }
     .attach-btn:hover { border-color: var(--oc-accent); background: rgba(0,255,65,0.12); }
     .attach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .enhance-btn, .mic-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      border: 1px solid var(--oc-border-soft);
+      background: rgba(255,255,255,0.04);
+      color: var(--oc-accent-bright);
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .enhance-btn:hover, .mic-btn:hover { border-color: var(--oc-accent); background: rgba(0,255,65,0.12); }
+    .enhance-btn:disabled, .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .enhance-btn.busy { opacity: 0.6; cursor: progress; animation: oc-pulse 1s ease-in-out infinite; }
+    .mic-btn.recording { border-color: #ff4d4d; background: rgba(255,77,77,0.18); color: #ff6b6b; animation: oc-pulse 1s ease-in-out infinite; }
+    @keyframes oc-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
     .send-btn {
       width: 36px;
       height: 36px;
@@ -805,6 +824,7 @@ function renderChatHtml({ nonce, platform }) {
     .session-item:hover { background: rgba(255,255,255,0.04); border-color: var(--oc-border-soft); }
     .session-item-title { font-weight: 600; font-size: 13px; color: var(--oc-text); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-item-preview { font-size: 11px; color: var(--oc-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-item-last { font-size: 11px; font-style: italic; color: var(--oc-text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
     .session-item-time { font-size: 10px; color: var(--oc-text-soft); margin-top: 2px; }
     .session-empty { text-align: center; padding: 32px; color: var(--oc-text-soft); }
     .drop-overlay {
@@ -941,12 +961,14 @@ function renderChatHtml({ nonce, platform }) {
   <div class="attachments-tray" id="attachmentsTray" aria-live="polite"></div>
   <div class="drop-overlay" id="dropOverlay" aria-hidden="true">
     <div class="drop-overlay-inner">
-      Solte os arquivos para anexar
-      <div class="drop-overlay-hint">Arquivos do explorer ou do seu sistema</div>
+      Segure Shift e solte os arquivos para anexar
+      <div class="drop-overlay-hint">Arquivos do explorer ou do seu sistema &middot; mantenha Shift pressionado ao arrastar</div>
     </div>
   </div>
   <div class="input-area">
     <button class="attach-btn" id="attachBtn" title="Anexar arquivos">&#x1F4CE;</button>
+    <button class="enhance-btn" id="enhanceBtn" title="Melhorar prompt com IA">&#x2728;</button>
+    <button class="mic-btn" id="micBtn" title="Ditar por voz">&#x1F3A4;</button>
     <textarea id="chatInput" placeholder="Mensagem para o OPEN MATRIX... Use / para comandos. Use o botao de anexo para arquivos." rows="1"></textarea>
     <button class="send-btn" id="sendBtn" title="Enviar mensagem">&#x27A4;</button>
   </div>
@@ -987,6 +1009,8 @@ function renderChatHtml({ nonce, platform }) {
   const inputEl = document.getElementById('chatInput');
   const sendBtn = document.getElementById('sendBtn');
   const attachBtn = document.getElementById('attachBtn');
+  const enhanceBtn = document.getElementById('enhanceBtn');
+  const micBtn = document.getElementById('micBtn');
   const attachmentsTray = document.getElementById('attachmentsTray');
   const abortBtn = document.getElementById('abortBtn');
   const newChatBtn = document.getElementById('newChatBtn');
@@ -1130,7 +1154,7 @@ function renderChatHtml({ nonce, platform }) {
 
   function setPowerBadge(detail, permissionMode, tools) {
     if (!powerBadge) return;
-    const mode = permissionMode || 'bypassPermissions';
+    const mode = permissionMode || 'acceptEdits';
     const toolText = Array.isArray(tools) ? 'default' : (tools || 'default');
     const label = mode === 'bypassPermissions'
       ? 'Poder total'
@@ -1622,9 +1646,13 @@ function renderChatHtml({ nonce, platform }) {
     for (const [label, items] of groups) {
       html += '<div class="session-group-label">' + escapeForMd(label) + '</div>';
       for (const s of items) {
+        var lastLine = (s.lastMessage && s.lastMessage !== s.preview)
+          ? '<div class="session-item-last">\u21b3 ' + escapeForMd(s.lastMessage) + '</div>'
+          : '';
         html += '<div class="session-item" data-session-id="' + (s.id || '') + '">' +
           '<div class="session-item-title">' + escapeForMd(s.title || s.id || 'Sem titulo') + '</div>' +
           '<div class="session-item-preview">' + escapeForMd(s.preview || '') + '</div>' +
+          lastLine +
           '<div class="session-item-time">' + escapeForMd(s.timeLabel || '') + '</div>' +
         '</div>';
       }
@@ -1730,18 +1758,21 @@ function renderChatHtml({ nonce, platform }) {
     }
 
     window.addEventListener('dragenter', (e) => {
-      if (!hasFiles(e.dataTransfer)) return;
+      // Always preventDefault so the webview becomes a valid drop target.
+      // Per the HTML5 spec, if dragover does not call preventDefault the
+      // browser rejects the drop and the 'drop' event never fires. In VS Code
+      // webviews the file types are often not exposed on dataTransfer until the
+      // drop itself, so we cannot gate preventDefault on hasFiles().
       e.preventDefault();
       dragDepth++;
-      showOverlay();
+      if (hasFiles(e.dataTransfer)) showOverlay();
     });
     window.addEventListener('dragover', (e) => {
-      if (!hasFiles(e.dataTransfer)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      if (hasFiles(e.dataTransfer)) showOverlay();
     });
     window.addEventListener('dragleave', (e) => {
-      if (!hasFiles(e.dataTransfer)) return;
       dragDepth--;
       if (dragDepth <= 0) hideOverlay();
     });
@@ -1925,6 +1956,98 @@ function renderChatHtml({ nonce, platform }) {
   sendBtn.addEventListener('click', sendMessage);
   if (attachBtn) {
     attachBtn.addEventListener('click', () => vscode.postMessage({ type: 'pick_files' }));
+  }
+
+  // --- Melhorador de prompt com IA ---
+  let enhancing = false;
+  let preEnhanceText = '';
+  function setEnhancing(on) {
+    enhancing = on;
+    if (!enhanceBtn) return;
+    enhanceBtn.classList.toggle('busy', on);
+    enhanceBtn.disabled = on;
+    enhanceBtn.title = on ? 'Melhorando...' : 'Melhorar prompt com IA';
+  }
+  if (enhanceBtn) {
+    enhanceBtn.addEventListener('click', () => {
+      if (enhancing) return;
+      const text = (inputEl.value || '').trim();
+      if (!text) { appendStatusMessage('Digite um prompt antes de melhorar.'); return; }
+      preEnhanceText = inputEl.value;
+      setEnhancing(true);
+      vscode.postMessage({ type: 'enhance_prompt', text });
+    });
+  }
+
+  // --- Ditado por voz ---
+  // O ambiente do webview do VS Code (sandbox Electron) bloqueia tanto o
+  // webkitSpeechRecognition (sem backend de fala) quanto a captura de microfone
+  // via getUserMedia (NotAllowedError). Tentamos a captura e, se bloqueada,
+  // explicamos de forma clara em vez de falhar silenciosamente.
+  let mediaRecorder = null;
+  let mediaStream = null;
+  let audioChunks = [];
+  let recording = false;
+  const canCaptureAudio = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && typeof MediaRecorder !== 'undefined';
+  function setRecording(on) {
+    recording = on;
+    if (!micBtn) return;
+    micBtn.classList.toggle('recording', on);
+    micBtn.title = on ? 'Parar gravacao' : 'Ditar por voz';
+  }
+  function stopMediaStream() {
+    if (mediaStream) {
+      try { mediaStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+      mediaStream = null;
+    }
+  }
+  async function startRecording() {
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      const name = (e && e.name) ? e.name : '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        appendStatusMessage('Ditado por voz indisponivel: o ambiente do VS Code nao libera o microfone para a extensao (sandbox do webview). Digite o prompt ou use o botao de melhorar prompt.');
+      } else if (name === 'NotFoundError') {
+        appendStatusMessage('Nenhum microfone encontrado.');
+      } else {
+        appendStatusMessage('Falha ao acessar o microfone: ' + (e && e.message ? e.message : name || e));
+      }
+      setRecording(false);
+      return;
+    }
+    audioChunks = [];
+    try {
+      mediaRecorder = new MediaRecorder(mediaStream);
+    } catch (e) {
+      appendStatusMessage('Gravacao de audio indisponivel neste ambiente.');
+      stopMediaStream();
+      setRecording(false);
+      return;
+    }
+    mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) audioChunks.push(ev.data); };
+    mediaRecorder.onstop = () => { stopMediaStream(); };
+    mediaRecorder.start();
+    setRecording(true);
+  }
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      try { mediaRecorder.stop(); } catch (e) {}
+    } else {
+      stopMediaStream();
+    }
+    setRecording(false);
+  }
+  if (micBtn) {
+    if (!canCaptureAudio) {
+      micBtn.disabled = true;
+      micBtn.title = 'Captura de audio nao suportada neste ambiente';
+    } else {
+      micBtn.addEventListener('click', () => {
+        if (recording) { stopRecording(); return; }
+        startRecording();
+      });
+    }
   }
   document.addEventListener('paste', handlePaste);
   setupDragAndDrop();
@@ -2119,6 +2242,23 @@ function renderChatHtml({ nonce, platform }) {
         setStatusLabel('Falha ao anexar arquivo');
         break;
 
+      case 'enhance_prompt_result':
+        setEnhancing(false);
+        if (msg.text) {
+          inputEl.value = msg.text;
+          inputEl.dispatchEvent(new Event('input'));
+          inputEl.focus();
+          setStatusLabel('Prompt melhorado');
+        }
+        break;
+
+      case 'enhance_prompt_error':
+        setEnhancing(false);
+        if (preEnhanceText) inputEl.value = preEnhanceText;
+        appendStatusMessage('Melhorar prompt: ' + (msg.message || 'falha'));
+        setStatusLabel('Falha ao melhorar prompt');
+        break;
+
       case 'thinking_start':
         showThinkingBlock();
         break;
@@ -2172,6 +2312,9 @@ function renderChatHtml({ nonce, platform }) {
         break;
 
       case 'restore_messages':
+        // Keep activeTabId in sync with the restored tab so subsequent live
+        // stream messages (filtered by tabId below) are not silently dropped.
+        if (msg.tabId) activeTabId = msg.tabId;
         messagesEl.innerHTML = '';
         currentAssistantEl = null;
         currentTextEl = null;

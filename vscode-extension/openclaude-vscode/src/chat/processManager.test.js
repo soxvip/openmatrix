@@ -22,7 +22,7 @@ function loadProcessManager() {
   return require('./processManager');
 }
 
-test('buildProcessArgs enables full power by default', () => {
+test('buildProcessArgs uses acceptEdits by default', () => {
   const { buildProcessArgs } = loadProcessManager();
   const args = buildProcessArgs();
 
@@ -36,7 +36,7 @@ test('buildProcessArgs enables full power by default', () => {
     'default',
     '--permission-mode',
   ]);
-  assert.equal(args[8], 'bypassPermissions');
+  assert.equal(args[8], 'acceptEdits');
 });
 
 test('buildProcessArgs appends resume/model/extra args after core flags', () => {

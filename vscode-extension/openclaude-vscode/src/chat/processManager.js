@@ -20,7 +20,7 @@ const { parseStdoutLine, serializeStdinMessage, buildUserMessage, buildControlRe
 
 
 function buildProcessArgs({
-  permissionMode = 'bypassPermissions',
+  permissionMode = 'acceptEdits',
   sessionId = null,
   continueSession = false,
   model = null,
@@ -34,7 +34,7 @@ function buildProcessArgs({
     '--output-format=stream-json',
     '--include-partial-messages',
     '--tools', 'default',
-    '--permission-mode', permissionMode || 'bypassPermissions',
+    '--permission-mode', permissionMode || 'acceptEdits',
   ];
 
   if (sessionId) {
@@ -246,7 +246,7 @@ class ProcessManager {
     this._sessionId = opts.sessionId || null;
     this._continueSession = opts.continueSession || false;
     this._model = opts.model || null;
-    this._permissionMode = opts.permissionMode || 'bypassPermissions';
+    this._permissionMode = opts.permissionMode || 'acceptEdits';
     this._extraArgs = opts.extraArgs || [];
     this._appendSystemPrompt = opts.appendSystemPrompt || '';
     this._execFile = typeof opts.execFile === 'function' ? opts.execFile : execFile;
@@ -435,4 +435,4 @@ class ProcessManager {
   }
 }
 
-module.exports = { ProcessManager, buildProcessArgs, withPdfToolPath };
+module.exports = { ProcessManager, buildProcessArgs, withPdfToolPath, withNodeOnPath, resolveDirectInvocation };
