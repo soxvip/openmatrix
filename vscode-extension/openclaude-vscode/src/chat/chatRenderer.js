@@ -20,6 +20,7 @@ const FAVORITE_SLASH_COMMANDS = [
   { command: '/full', description: 'Ativar Poder total (tools default + bypassPermissions)', local: true },
   { command: '/safe', description: 'Modo seguro: auto-aprova edicoes, reduz risco', local: true },
   { command: '/plan', description: 'Modo planejamento: sem edicoes de arquivo', local: true },
+  { command: '/model', description: 'Trocar o modelo da LLM (respeita o token ativo)', local: true },
   { command: '/cost', description: 'Mostrar custo e uso da sessao' },
   { command: '/context', description: 'Mostrar contexto carregado' },
   { command: '/compact', description: 'Compactar conversa/contexto' },
@@ -530,6 +531,37 @@ function renderChatHtml({ nonce, platform }) {
       color: var(--oc-text-dim);
     }
     .perm-btn:hover { filter: brightness(1.15); }
+    .perm-btn:disabled { opacity: 0.4; cursor: default; filter: none; }
+
+    /* ── Question card (AskUserQuestion) ── */
+    .question-card .perm-title { color: var(--oc-text); }
+    .q-block { margin-bottom: 12px; }
+    .q-header {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--oc-text-soft);
+      margin-bottom: 3px;
+    }
+    .q-question { font-size: 12px; color: var(--oc-text); margin-bottom: 6px; }
+    .q-options { display: flex; flex-direction: column; gap: 5px; }
+    .q-option {
+      text-align: left;
+      padding: 7px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--oc-border-soft);
+      background: rgba(255,255,255,0.02);
+      cursor: pointer;
+      color: var(--oc-text);
+    }
+    .q-option:hover { border-color: var(--oc-positive); }
+    .q-option.selected {
+      border-color: var(--oc-positive);
+      background: rgba(0,255,65,0.12);
+    }
+    .q-option-label { font-size: 12px; font-weight: 600; }
+    .q-option-desc { font-size: 11px; color: var(--oc-text-dim); margin-top: 2px; }
 
     /* ── Status pill ── */
     .msg-status {
@@ -611,27 +643,39 @@ function renderChatHtml({ nonce, platform }) {
     /* ── Input area ── */
     .input-area {
       display: flex;
+      flex-direction: column;
       gap: 8px;
       padding: 10px 12px;
       border-top: 1px solid var(--oc-border-soft);
       background: var(--oc-panel);
       flex-shrink: 0;
-      align-items: flex-end;
+    }
+    .input-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .input-toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
     .input-area textarea {
-      flex: 1;
-      min-height: 36px;
-      max-height: 160px;
-      padding: 8px 12px;
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 92px;
+      max-height: 280px;
+      padding: 12px 14px;
       border: 1px solid var(--oc-border-soft);
       border-radius: 10px;
       background: rgba(255,255,255,0.04);
       color: var(--oc-text);
       font-family: inherit;
-      font-size: 13px;
+      font-size: 14px;
       resize: none;
       outline: none;
-      line-height: 1.4;
+      line-height: 1.5;
     }
     .input-area textarea::placeholder { color: var(--oc-text-soft); }
     .input-area textarea:focus { border-color: var(--oc-accent); }
@@ -689,7 +733,7 @@ function renderChatHtml({ nonce, platform }) {
     }
     .attach-btn:hover { border-color: var(--oc-accent); background: rgba(0,255,65,0.12); }
     .attach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .enhance-btn, .mic-btn {
+    .enhance-btn {
       width: 36px;
       height: 36px;
       border-radius: 10px;
@@ -703,10 +747,9 @@ function renderChatHtml({ nonce, platform }) {
       justify-content: center;
       flex-shrink: 0;
     }
-    .enhance-btn:hover, .mic-btn:hover { border-color: var(--oc-accent); background: rgba(0,255,65,0.12); }
-    .enhance-btn:disabled, .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .enhance-btn:hover { border-color: var(--oc-accent); background: rgba(0,255,65,0.12); }
+    .enhance-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .enhance-btn.busy { opacity: 0.6; cursor: progress; animation: oc-pulse 1s ease-in-out infinite; }
-    .mic-btn.recording { border-color: #ff4d4d; background: rgba(255,77,77,0.18); color: #ff6b6b; animation: oc-pulse 1s ease-in-out infinite; }
     @keyframes oc-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
     .send-btn {
       width: 36px;
@@ -754,6 +797,58 @@ function renderChatHtml({ nonce, platform }) {
       box-shadow: 0 18px 50px rgba(0,0,0,0.45);
       padding: 6px;
     }
+    .model-palette {
+      display: none;
+      position: absolute;
+      left: 12px;
+      right: 56px;
+      bottom: 58px;
+      z-index: 80;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid var(--oc-border-soft);
+      border-radius: 12px;
+      background: rgba(5, 12, 7, 0.98);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+      padding: 6px;
+    }
+    .model-palette.visible { display: block; }
+    .model-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .model-item:hover, .model-item.selected {
+      background: rgba(0,255,65,0.12);
+      border-color: rgba(0,255,65,0.28);
+    }
+    .model-item-name { color: var(--oc-accent-bright); font-weight: 700; font-size: 12px; }
+    .model-item-desc { color: var(--oc-text-dim); font-size: 11px; }
+    .model-btn {
+      height: 36px;
+      padding: 0 10px;
+      border-radius: 10px;
+      border: 1px solid var(--oc-border-soft);
+      background: rgba(255,255,255,0.04);
+      color: var(--oc-text);
+      cursor: pointer;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 1;
+      min-width: 0;
+      max-width: 180px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .model-btn:hover { border-color: var(--oc-accent); background: rgba(0,255,65,0.12); }
+    .model-btn #modelBtnLabel { overflow: hidden; text-overflow: ellipsis; }
     .slash-palette.visible { display: block; }
     .slash-item {
       display: grid;
@@ -958,6 +1053,7 @@ function renderChatHtml({ nonce, platform }) {
   </div>
 
   <div class="slash-palette" id="slashPalette" role="listbox" aria-label="Comandos de barra do OPEN MATRIX"></div>
+  <div class="model-palette" id="modelPalette" role="listbox" aria-label="Modelos disponiveis"></div>
   <div class="attachments-tray" id="attachmentsTray" aria-live="polite"></div>
   <div class="drop-overlay" id="dropOverlay" aria-hidden="true">
     <div class="drop-overlay-inner">
@@ -966,11 +1062,15 @@ function renderChatHtml({ nonce, platform }) {
     </div>
   </div>
   <div class="input-area">
-    <button class="attach-btn" id="attachBtn" title="Anexar arquivos">&#x1F4CE;</button>
-    <button class="enhance-btn" id="enhanceBtn" title="Melhorar prompt com IA">&#x2728;</button>
-    <button class="mic-btn" id="micBtn" title="Ditar por voz">&#x1F3A4;</button>
-    <textarea id="chatInput" placeholder="Mensagem para o OPEN MATRIX... Use / para comandos. Use o botao de anexo para arquivos." rows="1"></textarea>
-    <button class="send-btn" id="sendBtn" title="Enviar mensagem">&#x27A4;</button>
+    <textarea id="chatInput" placeholder="Mensagem para o OPEN MATRIX... Use / para comandos." rows="3"></textarea>
+    <div class="input-toolbar">
+      <div class="input-toolbar-left">
+        <button class="attach-btn" id="attachBtn" title="Anexar arquivos">&#x1F4CE;</button>
+        <button class="enhance-btn" id="enhanceBtn" title="Melhorar prompt com IA">&#x2728;</button>
+        <button class="model-btn" id="modelBtn" title="Trocar modelo da LLM"><span id="modelBtnLabel">Modelo</span> &#x25BE;</button>
+      </div>
+      <button class="send-btn" id="sendBtn" title="Enviar mensagem">&#x27A4;</button>
+    </div>
   </div>
 
   <!-- Historico de conversas -->
@@ -1010,7 +1110,6 @@ function renderChatHtml({ nonce, platform }) {
   const sendBtn = document.getElementById('sendBtn');
   const attachBtn = document.getElementById('attachBtn');
   const enhanceBtn = document.getElementById('enhanceBtn');
-  const micBtn = document.getElementById('micBtn');
   const attachmentsTray = document.getElementById('attachmentsTray');
   const abortBtn = document.getElementById('abortBtn');
   const newChatBtn = document.getElementById('newChatBtn');
@@ -1020,6 +1119,9 @@ function renderChatHtml({ nonce, platform }) {
   const statusUsage = document.getElementById('statusUsage');
   const powerBadge = document.getElementById('powerBadge');
   const slashPalette = document.getElementById('slashPalette');
+  const modelPalette = document.getElementById('modelPalette');
+  const modelBtn = document.getElementById('modelBtn');
+  const modelBtnLabel = document.getElementById('modelBtnLabel');
   const typingIndicator = document.getElementById('typingIndicator');
   const sessionOverlay = document.getElementById('sessionOverlay');
   const closeSessionsBtn = document.getElementById('closeSessionsBtn');
@@ -1286,6 +1388,13 @@ function renderChatHtml({ nonce, platform }) {
   function chooseSlashItem(index) {
     const item = slashVisibleItems[index];
     if (!item) return;
+    if (item.command === '/model') {
+      inputEl.value = '';
+      autoResizeInput();
+      hideSlashPalette();
+      toggleModelPalette();
+      return;
+    }
     if (item.local) {
       vscode.postMessage({ type: 'local_slash_command', command: item.command });
       inputEl.value = '';
@@ -1524,6 +1633,10 @@ function renderChatHtml({ nonce, platform }) {
       appendPlanApprovalCard(perm);
       return;
     }
+    if (perm.isQuestion && Array.isArray(perm.questions) && perm.questions.length) {
+      appendQuestionCard(perm);
+      return;
+    }
     const el = document.createElement('div');
     el.className = 'perm-card';
     el.dataset.requestId = perm.requestId || '';
@@ -1581,6 +1694,103 @@ function renderChatHtml({ nonce, platform }) {
         btn.style.opacity = '1';
       });
     });
+    messagesEl.appendChild(el);
+    scrollToBottom();
+  }
+
+  function appendQuestionCard(perm) {
+    const el = document.createElement('div');
+    el.className = 'perm-card question-card';
+    el.dataset.requestId = perm.requestId || '';
+    const questions = perm.questions || [];
+    // selections[i] = Set of chosen labels for question i
+    const selections = questions.map(() => new Set());
+
+    let html =
+      '<div class="perm-title">' + escapeForMd(perm.displayName || 'Pergunta') + '</div>' +
+      (perm.description ? '<div class="perm-desc">' + escapeForMd(perm.description) + '</div>' : '');
+    questions.forEach((q, qi) => {
+      const opts = Array.isArray(q.options) ? q.options : [];
+      const multi = !!q.multiSelect;
+      html += '<div class="q-block" data-qi="' + qi + '">' +
+        (q.header ? '<div class="q-header">' + escapeForMd(q.header) + '</div>' : '') +
+        '<div class="q-question">' + escapeForMd(q.question || '') + '</div>' +
+        '<div class="q-options">';
+      opts.forEach((o, oi) => {
+        const label = o == null ? '' : (o.label != null ? String(o.label) : String(o));
+        const desc = o && o.description != null ? String(o.description) : '';
+        html += '<button class="q-option" data-qi="' + qi + '" data-oi="' + oi + '" data-multi="' + (multi ? '1' : '0') + '">' +
+          '<div class="q-option-label">' + escapeForMd(label) + '</div>' +
+          (desc ? '<div class="q-option-desc">' + escapeForMd(desc) + '</div>' : '') +
+        '</button>';
+      });
+      html += '</div></div>';
+    });
+    html += '<div class="perm-actions">' +
+        '<button class="perm-btn allow" data-action="submit" disabled>Enviar</button>' +
+        '<button class="perm-btn deny" data-action="deny">Cancelar</button>' +
+      '</div>';
+    el.innerHTML = html;
+
+    const submitBtn = el.querySelector('.perm-btn[data-action="submit"]');
+    function refreshSubmit() {
+      // Enabled once every question has at least one selection.
+      const ready = selections.every(s => s.size > 0);
+      if (submitBtn) submitBtn.disabled = !ready;
+    }
+
+    el.querySelectorAll('.q-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const qi = parseInt(btn.getAttribute('data-qi'), 10);
+        const oi = parseInt(btn.getAttribute('data-oi'), 10);
+        const multi = btn.getAttribute('data-multi') === '1';
+        const q = questions[qi];
+        const opts = Array.isArray(q.options) ? q.options : [];
+        const opt = opts[oi];
+        const label = opt == null ? '' : (opt.label != null ? String(opt.label) : String(opt));
+        const sel = selections[qi];
+        if (multi) {
+          if (sel.has(label)) sel.delete(label); else sel.add(label);
+          btn.classList.toggle('selected', sel.has(label));
+        } else {
+          sel.clear();
+          sel.add(label);
+          el.querySelectorAll('.q-option[data-qi="' + qi + '"]').forEach(b => b.classList.remove('selected'));
+          btn.classList.add('selected');
+        }
+        refreshSubmit();
+      });
+    });
+
+    el.querySelectorAll('.perm-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        if (action === 'submit') {
+          if (submitBtn && submitBtn.disabled) return;
+          const answers = {};
+          questions.forEach((q, qi) => {
+            answers[q.question || ''] = Array.from(selections[qi]).join(', ');
+          });
+          vscode.postMessage({
+            type: 'permission_response',
+            requestId: perm.requestId,
+            toolUseId: perm.toolUseId || null,
+            action: 'allow',
+            answers: answers,
+          });
+        } else {
+          vscode.postMessage({
+            type: 'permission_response',
+            requestId: perm.requestId,
+            toolUseId: perm.toolUseId || null,
+            action: 'deny',
+          });
+        }
+        el.querySelectorAll('.perm-btn, .q-option').forEach(b => { b.disabled = true; });
+        el.style.opacity = '0.7';
+      });
+    });
+
     messagesEl.appendChild(el);
     scrollToBottom();
   }
@@ -1911,12 +2121,78 @@ function renderChatHtml({ nonce, platform }) {
       hideSlashPalette();
       return;
     }
+    if (localCommand === '/model') {
+      inputEl.value = '';
+      autoResizeInput();
+      hideSlashPalette();
+      toggleModelPalette();
+      return;
+    }
     sendText(text);
+  }
+
+  // --- Seletor de modelo (dropdown in-webview) ---
+  let modelList = [];
+  let currentModel = null;
+  // Set the moment the user picks a model from the palette. The async
+  // model_list / system replies that arrive afterwards can carry a stale
+  // "current" (the previous config default), so we must not let them clobber
+  // the user's fresh choice and make the label snap back.
+  let userPickedModel = false;
+  let modelPaletteOpen = false;
+  function setModelButtonLabel(value) {
+    currentModel = value || null;
+    if (modelBtnLabel) modelBtnLabel.textContent = value ? shortModelName(value) : 'Modelo';
+  }
+  function shortModelName(v) {
+    if (!v) return 'Modelo';
+    const parts = String(v).split('/');
+    return parts[parts.length - 1];
+  }
+  function hideModelPalette() {
+    modelPaletteOpen = false;
+    if (modelPalette) modelPalette.classList.remove('visible');
+  }
+  function renderModelPalette() {
+    if (!modelPalette) return;
+    if (modelList.length === 0) {
+      modelPalette.innerHTML = '<div class="model-item"><div class="model-item-desc">Carregando modelos...</div></div>';
+      return;
+    }
+    let html = '';
+    for (const m of modelList) {
+      const isCur = (m.value || null) === currentModel;
+      html += '<div class="model-item' + (isCur ? ' selected' : '') + '" data-model="' + escapeForMd(m.value == null ? '' : String(m.value)).replace(/"/g, '&quot;') + '">' +
+        '<div class="model-item-name">' + (isCur ? '\u2713 ' : '') + escapeForMd(m.label || m.value || 'default') + '</div>' +
+        (m.description ? '<div class="model-item-desc">' + escapeForMd(m.description) + '</div>' : '') +
+      '</div>';
+    }
+    modelPalette.innerHTML = html;
+    modelPalette.querySelectorAll('.model-item[data-model]').forEach(el => {
+      el.addEventListener('click', () => {
+        const v = el.getAttribute('data-model');
+        const value = v === '' ? null : v;
+        userPickedModel = true;
+        vscode.postMessage({ type: 'set_model_choice', model: value });
+        setModelButtonLabel(value);
+        hideModelPalette();
+      });
+    });
+  }
+  function toggleModelPalette() {
+    if (modelPaletteOpen) { hideModelPalette(); return; }
+    modelPaletteOpen = true;
+    if (modelPalette) modelPalette.classList.add('visible');
+    renderModelPalette();
+    vscode.postMessage({ type: 'request_models' });
+  }
+  if (modelBtn) {
+    modelBtn.addEventListener('click', toggleModelPalette);
   }
 
   function autoResizeInput() {
     inputEl.style.height = 'auto';
-    inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+    inputEl.style.height = Math.min(Math.max(inputEl.scrollHeight, 92), 280) + 'px';
   }
 
   inputEl.addEventListener('input', () => {
@@ -1979,76 +2255,6 @@ function renderChatHtml({ nonce, platform }) {
     });
   }
 
-  // --- Ditado por voz ---
-  // O ambiente do webview do VS Code (sandbox Electron) bloqueia tanto o
-  // webkitSpeechRecognition (sem backend de fala) quanto a captura de microfone
-  // via getUserMedia (NotAllowedError). Tentamos a captura e, se bloqueada,
-  // explicamos de forma clara em vez de falhar silenciosamente.
-  let mediaRecorder = null;
-  let mediaStream = null;
-  let audioChunks = [];
-  let recording = false;
-  const canCaptureAudio = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && typeof MediaRecorder !== 'undefined';
-  function setRecording(on) {
-    recording = on;
-    if (!micBtn) return;
-    micBtn.classList.toggle('recording', on);
-    micBtn.title = on ? 'Parar gravacao' : 'Ditar por voz';
-  }
-  function stopMediaStream() {
-    if (mediaStream) {
-      try { mediaStream.getTracks().forEach(t => t.stop()); } catch (e) {}
-      mediaStream = null;
-    }
-  }
-  async function startRecording() {
-    try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (e) {
-      const name = (e && e.name) ? e.name : '';
-      if (name === 'NotAllowedError' || name === 'SecurityError') {
-        appendStatusMessage('Ditado por voz indisponivel: o ambiente do VS Code nao libera o microfone para a extensao (sandbox do webview). Digite o prompt ou use o botao de melhorar prompt.');
-      } else if (name === 'NotFoundError') {
-        appendStatusMessage('Nenhum microfone encontrado.');
-      } else {
-        appendStatusMessage('Falha ao acessar o microfone: ' + (e && e.message ? e.message : name || e));
-      }
-      setRecording(false);
-      return;
-    }
-    audioChunks = [];
-    try {
-      mediaRecorder = new MediaRecorder(mediaStream);
-    } catch (e) {
-      appendStatusMessage('Gravacao de audio indisponivel neste ambiente.');
-      stopMediaStream();
-      setRecording(false);
-      return;
-    }
-    mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) audioChunks.push(ev.data); };
-    mediaRecorder.onstop = () => { stopMediaStream(); };
-    mediaRecorder.start();
-    setRecording(true);
-  }
-  function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      try { mediaRecorder.stop(); } catch (e) {}
-    } else {
-      stopMediaStream();
-    }
-    setRecording(false);
-  }
-  if (micBtn) {
-    if (!canCaptureAudio) {
-      micBtn.disabled = true;
-      micBtn.title = 'Captura de audio nao suportada neste ambiente';
-    } else {
-      micBtn.addEventListener('click', () => {
-        if (recording) { stopRecording(); return; }
-        startRecording();
-      });
-    }
-  }
   document.addEventListener('paste', handlePaste);
   setupDragAndDrop();
   abortBtn.addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
@@ -2250,6 +2456,14 @@ function renderChatHtml({ nonce, platform }) {
           inputEl.focus();
           setStatusLabel('Prompt melhorado');
         }
+        break;
+
+      case 'model_list':
+        modelList = Array.isArray(msg.models) ? msg.models : [];
+        // Only adopt the backend's "current" if the user hasn't just picked a
+        // model. Otherwise a late reply would revert the label to the default.
+        if (msg.current !== undefined && !userPickedModel) setModelButtonLabel(msg.current);
+        if (modelPaletteOpen) renderModelPalette();
         break;
 
       case 'enhance_prompt_error':

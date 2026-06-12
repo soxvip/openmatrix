@@ -183,6 +183,50 @@ async function main(): Promise<void> {
     await validateProviderEnvForStartupOrExit()
   }
 
+  // --list-models [--json]: read-only enumeration of selectable models,
+  // filtered by the active token's entitlements. Used by the VS Code extension
+  // to build its model picker with the same options /model would show.
+  if (args.includes('--list-models')) {
+    const asJson = args.includes('--json')
+    const { getModelOptions } = await import('../utils/model/modelOptions.js')
+    const {
+      loadActiveTokenEntitlements,
+      hasActiveTokenEntitlementGate,
+      filterOptionsByTokenEntitlements,
+    } = await import('../utils/model/tokenEntitlements.js')
+    const { getMainLoopModel } = await import('../utils/model/model.js')
+    let options = getModelOptions()
+    const tokenEntitlements = await loadActiveTokenEntitlements()
+    if (hasActiveTokenEntitlementGate(tokenEntitlements)) {
+      options = filterOptionsByTokenEntitlements(options, tokenEntitlements)
+    }
+    let currentModel: string | null = null
+    try {
+      currentModel = getMainLoopModel()
+    } catch {
+      currentModel = null
+    }
+    if (asJson) {
+      // biome-ignore lint/suspicious/noConsole:: intentional machine output
+      console.log(
+        JSON.stringify({
+          current: currentModel,
+          models: options.map(o => ({
+            value: o.value,
+            label: o.label,
+            description: o.description ?? '',
+          })),
+        }),
+      )
+    } else {
+      for (const o of options) {
+        // biome-ignore lint/suspicious/noConsole:: intentional output
+        console.log(`${o.value === currentModel ? '* ' : '  '}${o.value}\t${o.label}`)
+      }
+    }
+    return
+  }
+
   // #808: --model alone (no --provider) — route to the env var matching the
   // active provider before the banner prints so the override is visible.
   if (args.includes('--model')) {

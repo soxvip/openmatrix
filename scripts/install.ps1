@@ -10,6 +10,101 @@ function Fail($Message) {
   exit 1
 }
 
+function Show-OpenMatrixLogo() {
+  $logo = @'
+
+   ____  ____  ____  _  _    __  __   __  ____  ____  __  _  _
+  /  _ \(  _ \(  __)( \( )  (  \/  ) /__\(_  _)(  _ \(  )( \/ )
+  )  (_) )) __/ ) _) )  (    )    ( /(__)\ )(   )   / )(  )  (
+  \____/(__)  (____)(_)\_)  (_/\/\_)(__)(__)(__) (_)\_)(__)(_/\_)
+
+'@
+  Write-Host $logo -ForegroundColor Green
+  Write-Host '  Instalador OPEN MATRIX' -ForegroundColor DarkGreen
+  Write-Host ''
+}
+
+function Show-InstallMenu() {
+  # Allow non-interactive override (CI / scripted installs).
+  if (-not [string]::IsNullOrWhiteSpace($env:OPEN_MATRIX_INSTALL_MODE)) {
+    $m = $env:OPEN_MATRIX_INSTALL_MODE.Trim()
+    if ($m -match '^[123]$') { return [int]$m }
+  }
+
+  $options = @(
+    'Instalar CLI no terminal',
+    'Instalar CLI no terminal + extensao VS Code',
+    'Instalar CLI no terminal + extensao no VS Antigravity'
+  )
+
+  # Fall back to a numbered prompt if the host cannot read raw keys.
+  $canRawKey = $true
+  try { $null = [Console]::CursorTop } catch { $canRawKey = $false }
+  if (-not $canRawKey -or [Console]::IsInputRedirected) {
+    Write-Host 'Escolha uma opcao de instalacao:' -ForegroundColor Green
+    for ($i = 0; $i -lt $options.Count; $i++) {
+      Write-Host ("  {0}) {1}" -f ($i + 1), $options[$i])
+    }
+    do {
+      $answer = Read-Host 'Digite 1, 2 ou 3'
+    } while ($answer -notmatch '^[123]$')
+    return [int]$answer
+  }
+
+  $selected = 0
+  $header = 'Use as setas (cima/baixo) e Enter para escolher:'
+  $firstDraw = $true
+  while ($true) {
+    if (-not $firstDraw) {
+      # Move cursor back up over the menu lines to redraw in place.
+      [Console]::SetCursorPosition(0, [Math]::Max(0, [Console]::CursorTop - ($options.Count + 2)))
+    }
+    $firstDraw = $false
+    Write-Host $header -ForegroundColor Green
+    Write-Host ''
+    for ($i = 0; $i -lt $options.Count; $i++) {
+      $line = '  ' + $options[$i] + (' ' * 8)
+      if ($i -eq $selected) {
+        Write-Host (' > ' + $options[$i] + '          ') -ForegroundColor Black -BackgroundColor Green
+      } else {
+        Write-Host ('   ' + $options[$i] + '          ') -ForegroundColor Gray
+      }
+    }
+    $key = [Console]::ReadKey($true)
+    switch ($key.Key) {
+      'UpArrow'   { $selected = ($selected - 1 + $options.Count) % $options.Count }
+      'DownArrow' { $selected = ($selected + 1) % $options.Count }
+      'Enter'     { Write-Host ''; return ($selected + 1) }
+      'D1'        { Write-Host ''; return 1 }
+      'D2'        { Write-Host ''; return 2 }
+      'D3'        { Write-Host ''; return 3 }
+      'NumPad1'   { Write-Host ''; return 1 }
+      'NumPad2'   { Write-Host ''; return 2 }
+      'NumPad3'   { Write-Host ''; return 3 }
+    }
+  }
+}
+
+function Get-AntigravityCommandPath() {
+  $command = Get-Command antigravity-ide -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+  $command = Get-Command antigravity -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+
+  $candidates = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\Antigravity IDE\bin\antigravity-ide.cmd'),
+    (Join-Path $env:LOCALAPPDATA 'Programs\Antigravity\bin\antigravity.cmd'),
+    (Join-Path $env:ProgramFiles 'Antigravity IDE\bin\antigravity-ide.cmd'),
+    (Join-Path $env:ProgramFiles 'Antigravity\bin\antigravity.cmd')
+  )
+  foreach ($candidate in $candidates) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+      return $candidate
+    }
+  }
+  return $null
+}
+
 function Download-WithRetry($Uri, $OutFile, $Label) {
   $maxAttempts = 5
   for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
@@ -71,6 +166,9 @@ function Install-OpenMatrixCliPackage($PackageFile) {
     throw 'npm install do pacote OPEN MATRIX falhou.'
   }
 }
+
+Show-OpenMatrixLogo
+$installMode = Show-InstallMenu
 
 Write-Host 'OPEN MATRIX installer for Windows' -ForegroundColor Green
 
@@ -304,17 +402,31 @@ try {
   if (Test-Path -LiteralPath $setupErr) { Remove-Item -LiteralPath $setupErr -Force -ErrorAction SilentlyContinue }
 }
 
-if ($env:OPEN_MATRIX_SKIP_VSCODE -eq '1') {
-  Write-Host 'Instalacao da extensao VS Code pulada por OPEN_MATRIX_SKIP_VSCODE=1.'
-} else {
+if ($installMode -eq 1) {
+  Write-Host 'Modo selecionado: apenas CLI no terminal. Extensao de editor nao sera instalada.' -ForegroundColor DarkGreen
+} elseif ($env:OPEN_MATRIX_SKIP_VSCODE -eq '1') {
+  Write-Host 'Instalacao da extensao de editor pulada por OPEN_MATRIX_SKIP_VSCODE=1.'
+} elseif ($installMode -eq 2) {
   $codeCommandPath = Get-VSCodeCommandPath
   if ($codeCommandPath) {
+    Write-Host 'Instalando extensao no VS Code...' -ForegroundColor Green
     $extensionExitCode = Install-OpenMatrixVSCodeExtension $codeCommandPath
     if ($extensionExitCode -ne 0) {
       Write-Warning 'Nao foi possivel instalar a extensao automaticamente. Instale manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix'
     }
   } else {
     Write-Warning 'VS Code nao encontrado via comando code nem nos caminhos padrao. Instale manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix'
+  }
+} elseif ($installMode -eq 3) {
+  $antigravityCommandPath = Get-AntigravityCommandPath
+  if ($antigravityCommandPath) {
+    Write-Host 'Instalando extensao no VS Antigravity...' -ForegroundColor Green
+    $extensionExitCode = Install-OpenMatrixVSCodeExtension $antigravityCommandPath
+    if ($extensionExitCode -ne 0) {
+      Write-Warning 'Nao foi possivel instalar a extensao no Antigravity automaticamente. Instale manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix'
+    }
+  } else {
+    Write-Warning 'VS Antigravity nao encontrado. Instale o Antigravity IDE e rode novamente, ou instale a extensao manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix'
   }
 }
 

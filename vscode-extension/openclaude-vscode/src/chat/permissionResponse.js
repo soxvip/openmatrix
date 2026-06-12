@@ -8,6 +8,7 @@
  *   input?: Record<string, unknown> | null,
  *   toolUseId?: string | null,
  *   permissionSuggestions?: unknown[] | null,
+ *   answers?: Record<string, string> | null,
  * }} ctx
  */
 function buildPermissionControlResult(action, ctx = {}) {
@@ -25,9 +26,17 @@ function buildPermissionControlResult(action, ctx = {}) {
     };
   }
 
+  // Interactive tools (e.g. AskUserQuestion) resolve via the permission
+  // response: the CLI feeds updatedInput back into the tool, which reads the
+  // user's selections from `answers` ({ [questionText]: label }).
+  const updatedInput =
+    ctx.answers && typeof ctx.answers === 'object' && !Array.isArray(ctx.answers)
+      ? { ...input, answers: ctx.answers }
+      : input;
+
   const result = {
     behavior: 'allow',
-    updatedInput: input,
+    updatedInput,
     toolUseID,
   };
 

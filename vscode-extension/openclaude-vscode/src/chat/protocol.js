@@ -77,6 +77,22 @@ function buildControlResponse(requestId, result) {
   };
 }
 
+let __controlRequestSeq = 0;
+function buildControlRequest(subtype, extra) {
+  __controlRequestSeq += 1;
+  const requestId = 'ext-' + Date.now() + '-' + __controlRequestSeq;
+  return {
+    type: 'control_request',
+    request_id: requestId,
+    request: { subtype, ...(extra || {}) },
+  };
+}
+
+function buildSetModelRequest(model) {
+  // model === null/undefined means "default"
+  return buildControlRequest('set_model', { model: model == null ? 'default' : model });
+}
+
 function isAssistantMessage(msg) {
   return msg && msg.type === MESSAGE_TYPES.ASSISTANT;
 }
@@ -164,6 +180,8 @@ module.exports = {
   serializeStdinMessage,
   buildUserMessage,
   buildControlResponse,
+  buildControlRequest,
+  buildSetModelRequest,
   isAssistantMessage,
   isPartialMessage,
   isStreamEvent,

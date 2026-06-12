@@ -3673,24 +3673,10 @@ Read the team config to discover your teammates' names. Check the task list peri
       ])
     }
     case 'todo_reminder': {
-      if (isEnvTruthy(process.env.OPENCLAUDE_DISABLE_TOOL_REMINDERS)) {
-        return []
-      }
-      const todoItems = attachment.content
-        .map((todo, index) => `${index + 1}. [${todo.status}] ${todo.content}`)
-        .join('\n')
-
-      let message = `The TodoWrite tool hasn't been used recently. If you're working on tasks that would benefit from tracking progress, consider using the TodoWrite tool to track progress. Also consider cleaning up the todo list if has become stale and no longer matches what you are working on. Only use it if it's relevant to the current work. This is just a gentle reminder - ignore if not applicable. Make sure that you NEVER mention this reminder to the user\n`
-      if (todoItems.length > 0) {
-        message += `\n\nHere are the existing contents of your todo list:\n\n[${todoItems}]`
-      }
-
-      return wrapMessagesInSystemReminder([
-        createUserMessage({
-          content: message,
-          isMeta: true,
-        }),
-      ])
+      // Disabled: this reminder was injected into model context and leaked
+      // into output, disrupting coding. TodoWrite remains available; we just
+      // no longer nag about it.
+      return []
     }
     case 'task_reminder': {
       if (!isTodoV2Enabled()) {

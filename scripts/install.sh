@@ -96,6 +96,108 @@ read_open_matrix_token() {
   fi
 }
 
+show_openmatrix_logo() {
+  printf '\n'
+  printf '   ____  ____  ____  _  _    __  __   __  ____  ____  __  _  _\n'
+  printf '  /  _ \\(  _ \\(  __)( \\( )  (  \\/  ) /__\\(_  _)(  _ \\(  )( \\/ )\n'
+  printf '  )  (_) )) __/ ) _) )  (    )    ( /(__)\\ )(   )   / )(  )  (\n'
+  printf '  \\____/(__)  (____)(_)\\_)  (_/\\/\\_)(__)(__)(__) (_)\\_)(__)(_/\\_)\n'
+  printf '\n'
+  printf '  Instalador OPEN MATRIX\n\n'
+}
+
+# Prints the chosen install mode (1/2/3) to stdout.
+show_install_menu() {
+  # Non-interactive override (CI / scripted installs).
+  case "${OPEN_MATRIX_INSTALL_MODE:-}" in
+    1|2|3) printf '%s\n' "$OPEN_MATRIX_INSTALL_MODE"; return 0 ;;
+  esac
+
+  opt1='Instalar CLI no terminal'
+  opt2='Instalar CLI no terminal + extensao VS Code'
+  opt3='Instalar CLI no terminal + extensao no VS Antigravity'
+
+  # Arrow-key navigation needs a real TTY. Fall back to a numbered prompt
+  # otherwise (e.g. piped `curl ... | bash`).
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    if [ -r /dev/tty ]; then
+      exec </dev/tty
+    else
+      printf 'Entrada nao interativa: instalando CLI + extensao VS Code (modo 2).\n' >&2
+      printf '2\n'
+      return 0
+    fi
+  fi
+
+  selected=1
+  esc=$(printf '\033')
+  # Hide cursor; restore on return.
+  printf '%s[?25l' "$esc" >&2
+  draw_menu() {
+    printf 'Use as setas (cima/baixo) e Enter para escolher:\n\n' >&2
+    i=1
+    for label in "$opt1" "$opt2" "$opt3"; do
+      if [ "$i" -eq "$selected" ]; then
+        printf '%s[7m > %s %s[0m\n' "$esc" "$label" "$esc" >&2
+      else
+        printf '   %s\n' "$label" >&2
+      fi
+      i=$((i + 1))
+    done
+  }
+  draw_menu
+  while true; do
+    # Read one byte; decode arrow escape sequences.
+    IFS= read -r -n1 key 2>/dev/null || key=''
+    if [ "$key" = "$esc" ]; then
+      IFS= read -r -n2 rest 2>/dev/null || rest=''
+      case "$rest" in
+        '[A') selected=$(( selected > 1 ? selected - 1 : 3 )) ;;
+        '[B') selected=$(( selected < 3 ? selected + 1 : 1 )) ;;
+      esac
+    else
+      case "$key" in
+        1) selected=1; key='' ; break_after=1 ;;
+        2) selected=2; key='' ; break_after=1 ;;
+        3) selected=3; key='' ; break_after=1 ;;
+        '') break ;;  # Enter
+      esac
+      if [ "${break_after:-0}" = '1' ]; then break; fi
+    fi
+    # Redraw in place: move cursor up over the 4 printed lines.
+    printf '%s[4A' "$esc" >&2
+    draw_menu
+  done
+  printf '%s[?25h\n' "$esc" >&2
+  printf '%s\n' "$selected"
+}
+
+find_antigravity_command() {
+  if command -v antigravity-ide >/dev/null 2>&1; then
+    command -v antigravity-ide
+    return 0
+  fi
+  if command -v antigravity >/dev/null 2>&1; then
+    command -v antigravity
+    return 0
+  fi
+  for candidate in \
+    "/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity" \
+    "/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide" \
+    "$HOME/.local/bin/antigravity-ide" \
+    "$HOME/.local/bin/antigravity" \
+    "/usr/local/bin/antigravity-ide" \
+    "/usr/local/bin/antigravity" \
+    "/snap/bin/antigravity"
+  do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 find_code_command() {
   if command -v code >/dev/null 2>&1; then
     command -v code
@@ -146,6 +248,9 @@ install_vscode_extension() {
   download_with_retry "$remote_vsix_url" "$temp_vsix" 'extensao VS Code OPEN MATRIX'
   "$code_cmd" --install-extension "$temp_vsix" --force
 }
+
+show_openmatrix_logo
+install_mode="$(show_install_menu)"
 
 printf 'OPEN MATRIX installer for macOS/Linux\n'
 
@@ -216,16 +321,29 @@ if [ "$setup_succeeded" -ne 1 ]; then
   fail 'Falha ao configurar provider OPEN MATRIX: tempo limite aguardando conclusao.'
 fi
 
-if [ "${OPEN_MATRIX_SKIP_VSCODE:-}" = '1' ]; then
-  printf 'Instalacao da extensao VS Code pulada por OPEN_MATRIX_SKIP_VSCODE=1.\n'
-else
+if [ "$install_mode" = '1' ]; then
+  printf 'Modo selecionado: apenas CLI no terminal. Extensao de editor nao sera instalada.\n'
+elif [ "${OPEN_MATRIX_SKIP_VSCODE:-}" = '1' ]; then
+  printf 'Instalacao da extensao de editor pulada por OPEN_MATRIX_SKIP_VSCODE=1.\n'
+elif [ "$install_mode" = '2' ]; then
   code_cmd="$(find_code_command || true)"
   if [ -n "$code_cmd" ]; then
+    printf 'Instalando extensao no VS Code...\n'
     if ! install_vscode_extension "$code_cmd"; then
       printf 'Aviso: nao foi possivel instalar a extensao automaticamente. Instale manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix\n' >&2
     fi
   else
     printf 'Aviso: VS Code nao encontrado via comando code nem nos caminhos padrao. Instale manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix\n' >&2
+  fi
+elif [ "$install_mode" = '3' ]; then
+  antigravity_cmd="$(find_antigravity_command || true)"
+  if [ -n "$antigravity_cmd" ]; then
+    printf 'Instalando extensao no VS Antigravity...\n'
+    if ! install_vscode_extension "$antigravity_cmd"; then
+      printf 'Aviso: nao foi possivel instalar a extensao no Antigravity automaticamente. Instale manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix\n' >&2
+    fi
+  else
+    printf 'Aviso: VS Antigravity nao encontrado. Instale o Antigravity IDE e rode novamente, ou instale a extensao manualmente: https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-vscode.vsix\n' >&2
   fi
 fi
 

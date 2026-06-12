@@ -16,7 +16,7 @@
 
 const { spawn, execFile } = require('child_process');
 const vscode = require('vscode');
-const { parseStdoutLine, serializeStdinMessage, buildUserMessage, buildControlResponse } = require('./protocol');
+const { parseStdoutLine, serializeStdinMessage, buildUserMessage, buildControlResponse, buildSetModelRequest } = require('./protocol');
 
 
 function buildProcessArgs({
@@ -374,6 +374,12 @@ class ProcessManager {
     this._write(buildControlResponse(requestId, result));
   }
 
+  // Switch the LLM model mid-session via the CLI's set_model control_request.
+  // No relaunch needed; the running session adopts the new model.
+  sendSetModel(model) {
+    this._write(buildSetModelRequest(model));
+  }
+
   write(msg) {
     if (!this._process || !this._process.stdin.writable) {
       throw new Error('Process is not running');
@@ -435,4 +441,51 @@ class ProcessManager {
   }
 }
 
-module.exports = { ProcessManager, buildProcessArgs, withPdfToolPath, withNodeOnPath, resolveDirectInvocation };
+// Run the CLI's read-only `--list-models --json` and return the parsed list,
+// filtered by the active token's entitlements (filtering happens in the CLI).
+// Reuses the same robust Windows invocation (node.exe + entry) as the chat.
+function listModels(command, cwd, env) {
+  const spawnEnv = withNodeOnPath(withPdfToolPath({ ...process.env, ...env }));
+  const isWin = process.platform === 'win32';
+  let file = command;
+  let args = ['--list-models', '--json'];
+  let useShell = false;
+  if (isWin) {
+    const direct = resolveDirectInvocation(command);
+    if (direct) {
+      file = direct.node;
+      args = [direct.entry, ...args];
+    } else {
+      useShell = true;
+    }
+  }
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    let child;
+    try {
+      child = spawn(file, args, { cwd, env: spawnEnv, shell: useShell, windowsHide: true });
+    } catch (e) {
+      reject(e);
+      return;
+    }
+    child.stdout.on('data', d => { stdout += d.toString(); });
+    child.stderr.on('data', d => { stderr += d.toString(); });
+    child.on('error', e => reject(e));
+    child.on('close', code => {
+      // The JSON is the last non-empty line (provider warnings may precede it).
+      const line = stdout.split('\n').map(s => s.trim()).filter(Boolean).pop();
+      if (!line) {
+        reject(new Error(stderr.trim() || ('Sem saida de --list-models (codigo ' + code + ')')));
+        return;
+      }
+      try {
+        resolve(JSON.parse(line));
+      } catch (e) {
+        reject(new Error('Falha ao parsear lista de modelos: ' + e.message));
+      }
+    });
+  });
+}
+
+module.exports = { ProcessManager, buildProcessArgs, withPdfToolPath, withNodeOnPath, resolveDirectInvocation, listModels };

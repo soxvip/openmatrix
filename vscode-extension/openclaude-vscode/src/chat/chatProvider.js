@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
-const { ProcessManager, withNodeOnPath, withPdfToolPath, resolveDirectInvocation } = require('./processManager');
+const { ProcessManager, withNodeOnPath, withPdfToolPath, resolveDirectInvocation, listModels } = require('./processManager');
 const { SessionManager } = require('./sessionManager');
 const { buildPermissionControlResult } = require('./permissionResponse');
 const { toViewModel } = require('./messageParser');
@@ -258,13 +258,14 @@ function getLaunchConfig() {
     ? rawExtraArgs.map(String).filter(Boolean)
     : [];
   const appendSystemPrompt = cfg.get('appendSystemPrompt', DEFAULT_APPEND_SYSTEM_PROMPT);
+  const model = cfg.get('model', '');
   let env = {};
   if (shimEnabled) env.CLAUDE_CODE_USE_OPENAI = '1';
   env = withBundledPopplerEnv(env);
   env = addKnownCliDirsToEnv(env);
   const folders = vscode.workspace.workspaceFolders;
   const cwd = folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
-  return { command, cwd, env, permissionMode, extraArgs, appendSystemPrompt };
+  return { command, cwd, env, permissionMode, extraArgs, appendSystemPrompt, model };
 }
 
 class ChatController {
@@ -359,7 +360,7 @@ class ChatController {
     this._currentSessionId = opts.sessionId || this._currentSessionId || null;
 
     const launchConfig = getLaunchConfig();
-    const { command, cwd, env, extraArgs, appendSystemPrompt } = launchConfig;
+    const { command, cwd, env, extraArgs, appendSystemPrompt, model } = launchConfig;
     const permissionMode = opts.permissionMode || this._permissionModeOverride || launchConfig.permissionMode || 'acceptEdits';
 
     this._process = new ProcessManager({
@@ -368,7 +369,7 @@ class ChatController {
       env,
       sessionId: opts.sessionId,
       continueSession: opts.continueSession || false,
-      model: opts.model,
+      model: opts.model || model || undefined,
       permissionMode,
       extraArgs: opts.extraArgs || extraArgs || [],
       appendSystemPrompt: opts.appendSystemPrompt ?? appendSystemPrompt,
@@ -526,7 +527,7 @@ class ChatController {
     this._onDidChangeState.fire('idle');
   }
 
-  sendPermissionResponse(requestId, action, toolUseId) {
+  sendPermissionResponse(requestId, action, toolUseId, answers) {
     if (!this._process) return;
     const pending = this._pendingPermissions.get(requestId);
     this._pendingPermissions.delete(requestId);
@@ -534,11 +535,24 @@ class ChatController {
       input: pending?.input,
       toolUseId: toolUseId || pending?.toolUseId || null,
       permissionSuggestions: pending?.permissionSuggestions,
+      answers: answers && typeof answers === 'object' ? answers : null,
     });
     try {
       this._process.sendControlResponse(requestId, result);
     } catch (err) {
       this._broadcast({ type: 'error', message: err.message });
+    }
+  }
+
+  // Switch the model mid-session. Returns true if the request was sent.
+  setModel(model) {
+    if (!this._process || !this._process.running) return false;
+    try {
+      this._process.sendSetModel(model);
+      return true;
+    } catch (err) {
+      this._broadcast({ type: 'error', message: err.message });
+      return false;
     }
   }
 
@@ -564,6 +578,14 @@ class ChatController {
   _handleMessage(msg) {
     if (msg.session_id && !this._currentSessionId) {
       this._currentSessionId = msg.session_id;
+    }
+
+    // Model-switch breadcrumbs: the CLI replays a synthetic user message after
+    // every set_model so the new model has context. These are bookkeeping, not
+    // a new turn â€” processing them as a real user message corrupts turn state
+    // and can leave the UI stuck "thinking", which blocks subsequent sends.
+    if (msg && msg.isReplay) {
+      return;
     }
 
     // System message â€” extract model and session info
@@ -608,6 +630,13 @@ class ChatController {
       const planText = isPlanApproval
         ? String((toolInput && (toolInput.plan || toolInput.message)) || '')
         : '';
+      // AskUserQuestion is an interactive tool: instead of a plain allow/deny,
+      // the user picks an option per question and we send the choices back as
+      // `answers` in updatedInput. Surface the questions to the webview.
+      const isQuestion = /askuserquestion/i.test(String(toolName));
+      const questions = isQuestion && Array.isArray(toolInput && toolInput.questions)
+        ? toolInput.questions
+        : null;
       this._broadcast({
         type: 'permission_request',
         requestId,
@@ -618,6 +647,8 @@ class ChatController {
         toolUseId: req.tool_use_id || null,
         isPlanApproval,
         planText,
+        isQuestion: !!questions,
+        questions,
       });
       return;
     }
@@ -1089,7 +1120,20 @@ class OpenMatrixChatViewProvider {
           await attachDroppedPathsForWebview(webview, msg.paths);
           break;
         case 'local_slash_command':
-          await this._ctl(msg).handleLocalSlashCommand(msg.command);
+          if (msg.command === '/model') {
+            await this._openModelPicker(webview);
+          } else {
+            await this._ctl(msg).handleLocalSlashCommand(msg.command);
+          }
+          break;
+        case 'open_model_picker':
+          await this._openModelPicker(webview);
+          break;
+        case 'request_models':
+          await this._sendModelList(webview);
+          break;
+        case 'set_model_choice':
+          await this._applyModelChoice(webview, msg.model);
           break;
         case 'abort':
           this._ctl(msg).abort();
@@ -1119,7 +1163,7 @@ class OpenMatrixChatViewProvider {
           break;
         }
         case 'permission_response':
-          this._ctl(msg).sendPermissionResponse(msg.requestId, msg.action, msg.toolUseId);
+          this._ctl(msg).sendPermissionResponse(msg.requestId, msg.action, msg.toolUseId, msg.answers);
           break;
         case 'plan_decision':
           await this._ctl(msg).handlePlanDecision(msg.requestId, msg.action, msg.toolUseId);
@@ -1166,6 +1210,104 @@ class OpenMatrixChatViewProvider {
       webview.postMessage({ type: 'session_list', sessions });
     } catch {
       webview.postMessage({ type: 'session_list', sessions: [] });
+    }
+  }
+
+  // /model: native QuickPick of token-entitlement-filtered models, then switch
+  // the running session via set_model (no relaunch). Mirrors CLI /model.
+  async _openModelPicker(webview) {
+    const ctl = this._tabs.getActive();
+    const { command, cwd, env } = getLaunchConfig();
+    let data;
+    try {
+      data = await listModels(command, cwd, env);
+    } catch (err) {
+      const m = (err && err.message) ? err.message : String(err);
+      if (/unknown option|--list-models/i.test(m)) {
+        vscode.window.showWarningMessage(
+          'OPEN MATRIX: sua CLI nao suporta a lista de modelos (--list-models). Atualize a CLI (open-matrix) para a versao mais recente, ou defina o modelo manualmente em Settings > openmatrix.extraArgs (ex.: ["--model","cx/gpt-5.5"]).'
+        );
+      } else {
+        vscode.window.showErrorMessage('OPEN MATRIX: nao foi possivel listar os modelos. ' + m);
+      }
+      return;
+    }
+    const models = (data && Array.isArray(data.models)) ? data.models : [];
+    if (models.length === 0) {
+      vscode.window.showWarningMessage('OPEN MATRIX: nenhum modelo disponivel para o token ativo.');
+      return;
+    }
+    const current = data.current || null;
+    const items = models.map(m => ({
+      label: (m.value === current ? '$(check) ' : '') + (m.label || m.value || 'default'),
+      description: m.value === current ? '(atual)' : (m.description || ''),
+      detail: m.value || 'default',
+      modelValue: m.value || null,
+    }));
+    const pick = await vscode.window.showQuickPick(items, {
+      title: 'OPEN MATRIX — Trocar modelo',
+      placeHolder: 'Selecione o modelo para esta sessao',
+      matchOnDescription: true,
+      matchOnDetail: true,
+    });
+    if (!pick) return;
+    const modelLabel = pick.label ? pick.label.replace('$(check) ', '') : pick.detail;
+    // Always persist the choice so it applies at the next CLI launch via --model,
+    // even when no session is running yet.
+    try {
+      await vscode.workspace
+        .getConfiguration('openmatrix')
+        .update('model', pick.modelValue || '', vscode.ConfigurationTarget.Global);
+    } catch (err) {
+      vscode.window.showErrorMessage('OPEN MATRIX: nao foi possivel salvar o modelo. ' + (err && err.message ? err.message : err));
+      return;
+    }
+    // If a session is already running, also switch live (no relaunch needed).
+    const switchedLive = ctl && ctl.setModel ? ctl.setModel(pick.modelValue) : false;
+    if (switchedLive) {
+      if (webview) webview.postMessage({ type: 'status', message: 'Modelo alterado para: ' + modelLabel });
+    } else {
+      vscode.window.showInformationMessage('OPEN MATRIX: modelo definido como ' + modelLabel + '. Sera aplicado quando voce iniciar ou continuar a conversa.');
+    }
+  }
+
+  // Send the token-filtered model list to the webview (for the in-panel dropdown).
+  async _sendModelList(webview) {
+    const { command, cwd, env, model } = getLaunchConfig();
+    let data;
+    try {
+      data = await listModels(command, cwd, env);
+    } catch (err) {
+      const m = (err && err.message) ? err.message : String(err);
+      webview.postMessage({ type: 'model_list', models: [], current: model || null, error: m });
+      return;
+    }
+    const models = (data && Array.isArray(data.models)) ? data.models : [];
+    // Prefer the live current model from the CLI; fall back to the persisted config.
+    const current = (data && data.current != null) ? data.current : (model || null);
+    webview.postMessage({ type: 'model_list', models, current });
+  }
+
+  // Apply a model chosen in the in-panel dropdown: persist + live-switch if running.
+  async _applyModelChoice(webview, model) {
+    const value = (model === '' || model == null) ? '' : String(model);
+    try {
+      await vscode.workspace
+        .getConfiguration('openmatrix')
+        .update('model', value, vscode.ConfigurationTarget.Global);
+    } catch (err) {
+      vscode.window.showErrorMessage('OPEN MATRIX: nao foi possivel salvar o modelo. ' + (err && err.message ? err.message : err));
+      return;
+    }
+    const ctl = this._tabs.getActive();
+    const switchedLive = ctl && ctl.setModel ? ctl.setModel(value || null) : false;
+    if (webview) {
+      webview.postMessage({
+        type: 'status',
+        message: switchedLive
+          ? 'Modelo alterado para esta sessao.'
+          : 'Modelo definido. Sera aplicado quando voce iniciar ou continuar a conversa.',
+      });
     }
   }
 
@@ -1263,7 +1405,20 @@ class OpenMatrixChatPanelManager {
           await attachDroppedPathsForWebview(webview, msg.paths);
           break;
         case 'local_slash_command':
-          await this._ctl(msg).handleLocalSlashCommand(msg.command);
+          if (msg.command === '/model') {
+            await this._openModelPicker(webview);
+          } else {
+            await this._ctl(msg).handleLocalSlashCommand(msg.command);
+          }
+          break;
+        case 'open_model_picker':
+          await this._openModelPicker(webview);
+          break;
+        case 'request_models':
+          await this._sendModelList(webview);
+          break;
+        case 'set_model_choice':
+          await this._applyModelChoice(webview, msg.model);
           break;
         case 'abort':
           this._ctl(msg).abort();
@@ -1293,7 +1448,7 @@ class OpenMatrixChatPanelManager {
           break;
         }
         case 'permission_response':
-          this._ctl(msg).sendPermissionResponse(msg.requestId, msg.action, msg.toolUseId);
+          this._ctl(msg).sendPermissionResponse(msg.requestId, msg.action, msg.toolUseId, msg.answers);
           break;
         case 'plan_decision':
           await this._ctl(msg).handlePlanDecision(msg.requestId, msg.action, msg.toolUseId);
@@ -1340,6 +1495,104 @@ class OpenMatrixChatPanelManager {
       webview.postMessage({ type: 'session_list', sessions });
     } catch {
       webview.postMessage({ type: 'session_list', sessions: [] });
+    }
+  }
+
+  // /model: native QuickPick of token-entitlement-filtered models, then switch
+  // the running session via set_model (no relaunch). Mirrors CLI /model.
+  async _openModelPicker(webview) {
+    const ctl = this._tabs.getActive();
+    const { command, cwd, env } = getLaunchConfig();
+    let data;
+    try {
+      data = await listModels(command, cwd, env);
+    } catch (err) {
+      const m = (err && err.message) ? err.message : String(err);
+      if (/unknown option|--list-models/i.test(m)) {
+        vscode.window.showWarningMessage(
+          'OPEN MATRIX: sua CLI nao suporta a lista de modelos (--list-models). Atualize a CLI (open-matrix) para a versao mais recente, ou defina o modelo manualmente em Settings > openmatrix.extraArgs (ex.: ["--model","cx/gpt-5.5"]).'
+        );
+      } else {
+        vscode.window.showErrorMessage('OPEN MATRIX: nao foi possivel listar os modelos. ' + m);
+      }
+      return;
+    }
+    const models = (data && Array.isArray(data.models)) ? data.models : [];
+    if (models.length === 0) {
+      vscode.window.showWarningMessage('OPEN MATRIX: nenhum modelo disponivel para o token ativo.');
+      return;
+    }
+    const current = data.current || null;
+    const items = models.map(m => ({
+      label: (m.value === current ? '$(check) ' : '') + (m.label || m.value || 'default'),
+      description: m.value === current ? '(atual)' : (m.description || ''),
+      detail: m.value || 'default',
+      modelValue: m.value || null,
+    }));
+    const pick = await vscode.window.showQuickPick(items, {
+      title: 'OPEN MATRIX — Trocar modelo',
+      placeHolder: 'Selecione o modelo para esta sessao',
+      matchOnDescription: true,
+      matchOnDetail: true,
+    });
+    if (!pick) return;
+    const modelLabel = pick.label ? pick.label.replace('$(check) ', '') : pick.detail;
+    // Always persist the choice so it applies at the next CLI launch via --model,
+    // even when no session is running yet.
+    try {
+      await vscode.workspace
+        .getConfiguration('openmatrix')
+        .update('model', pick.modelValue || '', vscode.ConfigurationTarget.Global);
+    } catch (err) {
+      vscode.window.showErrorMessage('OPEN MATRIX: nao foi possivel salvar o modelo. ' + (err && err.message ? err.message : err));
+      return;
+    }
+    // If a session is already running, also switch live (no relaunch needed).
+    const switchedLive = ctl && ctl.setModel ? ctl.setModel(pick.modelValue) : false;
+    if (switchedLive) {
+      if (webview) webview.postMessage({ type: 'status', message: 'Modelo alterado para: ' + modelLabel });
+    } else {
+      vscode.window.showInformationMessage('OPEN MATRIX: modelo definido como ' + modelLabel + '. Sera aplicado quando voce iniciar ou continuar a conversa.');
+    }
+  }
+
+  // Send the token-filtered model list to the webview (for the in-panel dropdown).
+  async _sendModelList(webview) {
+    const { command, cwd, env, model } = getLaunchConfig();
+    let data;
+    try {
+      data = await listModels(command, cwd, env);
+    } catch (err) {
+      const m = (err && err.message) ? err.message : String(err);
+      webview.postMessage({ type: 'model_list', models: [], current: model || null, error: m });
+      return;
+    }
+    const models = (data && Array.isArray(data.models)) ? data.models : [];
+    // Prefer the live current model from the CLI; fall back to the persisted config.
+    const current = (data && data.current != null) ? data.current : (model || null);
+    webview.postMessage({ type: 'model_list', models, current });
+  }
+
+  // Apply a model chosen in the in-panel dropdown: persist + live-switch if running.
+  async _applyModelChoice(webview, model) {
+    const value = (model === '' || model == null) ? '' : String(model);
+    try {
+      await vscode.workspace
+        .getConfiguration('openmatrix')
+        .update('model', value, vscode.ConfigurationTarget.Global);
+    } catch (err) {
+      vscode.window.showErrorMessage('OPEN MATRIX: nao foi possivel salvar o modelo. ' + (err && err.message ? err.message : err));
+      return;
+    }
+    const ctl = this._tabs.getActive();
+    const switchedLive = ctl && ctl.setModel ? ctl.setModel(value || null) : false;
+    if (webview) {
+      webview.postMessage({
+        type: 'status',
+        message: switchedLive
+          ? 'Modelo alterado para esta sessao.'
+          : 'Modelo definido. Sera aplicado quando voce iniciar ou continuar a conversa.',
+      });
     }
   }
 
