@@ -132,11 +132,24 @@ function Download-WithRetry($Uri, $OutFile, $Label) {
   }
 }
 
+function Resolve-NpmCmd() {
+  # Em PowerShell, `& npm` resolve para npm.ps1 (scripts .ps1 tem precedencia na
+  # descoberta de comandos), que pode ser bloqueado pelo ExecutionPolicy do
+  # sistema. Forcamos o npm.cmd, que nao sofre com isso.
+  $byCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+  if ($byCmd) { return $byCmd.Source }
+  $byApp = Get-Command npm -CommandType Application -ErrorAction SilentlyContinue |
+    Where-Object { $_.Source -like '*.cmd' } | Select-Object -First 1
+  if ($byApp) { return $byApp.Source }
+  return 'npm.cmd'
+}
+
 function Install-NpmGlobalWithRetry($Spec) {
   $maxAttempts = 3
+  $npm = Resolve-NpmCmd
   for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
     Write-Host "Instalando pacote npm (tentativa $attempt/$maxAttempts)..."
-    & npm install -g $Spec --no-audit --no-fund
+    & $npm install -g $Spec --no-audit --no-fund
     if ($LASTEXITCODE -eq 0) {
       return
     }
@@ -302,7 +315,8 @@ function Install-OpenMatrixCliPackage($PackageFile) {
   }
 
   Write-Host 'Instalando OPEN MATRIX no npm global...'
-  & npm install -g $PackageFile --no-audit --no-fund
+  $npm = Resolve-NpmCmd
+  & $npm install -g $PackageFile --no-audit --no-fund
   if ($LASTEXITCODE -ne 0) {
     throw 'npm install do pacote OPEN MATRIX falhou.'
   }
@@ -325,7 +339,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 }
 
 function Add-NpmGlobalPrefixToPath() {
-  $prefix = (& npm prefix -g 2>$null | Select-Object -First 1)
+  $prefix = (& (Resolve-NpmCmd) prefix -g 2>$null | Select-Object -First 1)
   if ([string]::IsNullOrWhiteSpace($prefix)) {
     return
   }
@@ -455,7 +469,7 @@ function Get-OpenMatrixCommandPath() {
   # stale shim from a previous/non-npm install earlier on PATH (e.g.
   # %LOCALAPPDATA%\OpenMatrix\bin) does not get picked instead and crash with
   # MODULE_NOT_FOUND.
-  $prefix = (& npm prefix -g 2>$null | Select-Object -First 1)
+  $prefix = (& (Resolve-NpmCmd) prefix -g 2>$null | Select-Object -First 1)
   if (-not [string]::IsNullOrWhiteSpace($prefix)) {
     $prefix = $prefix.Trim()
     foreach ($name in @('open-matrix.cmd', 'open-matrix')) {
