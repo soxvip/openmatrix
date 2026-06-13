@@ -508,60 +508,30 @@ if ([string]::IsNullOrWhiteSpace($token)) {
 
 Write-Host 'Configurando provider OPEN MATRIX...'
 $previousOpenMatrixApiKey = $env:OPEN_MATRIX_API_KEY
-$setupLog = Join-Path ([IO.Path]::GetTempPath()) ("open-matrix-setup-$([guid]::NewGuid().ToString('N')).log")
-$setupErr = Join-Path ([IO.Path]::GetTempPath()) ("open-matrix-setup-$([guid]::NewGuid().ToString('N')).err")
-$setupProcess = $null
 $setupSucceeded = $false
 try {
+  # Passa o token via --token-stdin (deterministico): o setup le do stdin e
+  # nunca cai no prompt interativo, que travaria sob Start-Process sem console
+  # (causa do timeout / "Codigo:" vazio). Mantemos a env var como reforco.
   $env:OPEN_MATRIX_API_KEY = $token
-  $setupProcess = Start-Process -FilePath $openMatrixCommand.Source -ArgumentList @('setup') -NoNewWindow -PassThru -RedirectStandardOutput $setupLog -RedirectStandardError $setupErr
-  $deadline = (Get-Date).AddSeconds(90)
-  while ((Get-Date) -lt $deadline) {
-    $setupText = ''
-    if (Test-Path -LiteralPath $setupLog) {
-      $setupText += Get-Content -LiteralPath $setupLog -Raw -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -LiteralPath $setupErr) {
-      $setupText += Get-Content -LiteralPath $setupErr -Raw -ErrorAction SilentlyContinue
-    }
-    if ($setupText -match 'Configuracao OPEN MATRIX concluida\.') {
-      $setupSucceeded = $true
-      break
-    }
-    if ($setupProcess.HasExited) {
-      break
-    }
-    Start-Sleep -Milliseconds 250
+  $setupOutput = ($token | & $openMatrixCommand.Source setup --token-stdin 2>&1 | Out-String)
+  $setupExitCode = $LASTEXITCODE
+  if (-not [string]::IsNullOrWhiteSpace($setupOutput)) {
+    Write-Host $setupOutput.TrimEnd()
+  }
+  if ($setupOutput -match 'Configuracao OPEN MATRIX concluida\.' -or $setupExitCode -eq 0) {
+    $setupSucceeded = $true
   }
 
-  if (-not $setupProcess.HasExited) {
-    Stop-Process -Id $setupProcess.Id -Force -ErrorAction SilentlyContinue
-    $setupProcess.WaitForExit(5000) | Out-Null
-  }
-
-  if (Test-Path -LiteralPath $setupLog) {
-    $setupStdout = Get-Content -LiteralPath $setupLog -Raw -ErrorAction SilentlyContinue
-    if (-not [string]::IsNullOrWhiteSpace($setupStdout)) {
-      Write-Host $setupStdout.TrimEnd()
-    }
-  }
-  if (Test-Path -LiteralPath $setupErr) {
-    $setupStderr = Get-Content -LiteralPath $setupErr -Raw -ErrorAction SilentlyContinue
-    if (-not [string]::IsNullOrWhiteSpace($setupStderr)) {
-      Write-Host $setupStderr.TrimEnd()
-    }
-  }
-
-  if (-not $setupSucceeded -and $setupProcess.ExitCode -ne 0) {
-    Fail "Falha ao configurar provider OPEN MATRIX. Codigo: $($setupProcess.ExitCode)"
-  }
   if (-not $setupSucceeded) {
-    Fail 'Falha ao configurar provider OPEN MATRIX: tempo limite aguardando conclusao.'
+    $detail = $setupOutput.Trim()
+    if ([string]::IsNullOrWhiteSpace($detail)) {
+      $detail = "codigo $setupExitCode"
+    }
+    Fail "Falha ao configurar provider OPEN MATRIX: $detail"
   }
 } finally {
   $env:OPEN_MATRIX_API_KEY = $previousOpenMatrixApiKey
-  if (Test-Path -LiteralPath $setupLog) { Remove-Item -LiteralPath $setupLog -Force -ErrorAction SilentlyContinue }
-  if (Test-Path -LiteralPath $setupErr) { Remove-Item -LiteralPath $setupErr -Force -ErrorAction SilentlyContinue }
 }
 
 if ($installMode -eq 1) {
