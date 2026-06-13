@@ -6,8 +6,11 @@ try {
 }
 
 function Fail($Message) {
-  Write-Error $Message
-  exit 1
+  # throw (em vez de só Write-Error + exit) garante o encerramento mesmo quando
+  # o script roda via `irm ... | iex`, onde `exit` nao interrompe o pipeline e
+  # causa cascata de erros / aparencia de loop.
+  Write-Host "ERRO: $Message" -ForegroundColor Red
+  throw $Message
 }
 
 function Show-OpenMatrixLogo() {
@@ -196,26 +199,73 @@ function Install-NodeViaWinget() {
   return ($LASTEXITCODE -eq 0)
 }
 
-function Install-NodeViaMsi() {
-  Write-Host 'winget indisponivel. Baixando o instalador oficial do Node.js...' -ForegroundColor Green
+function Install-NodeViaZip() {
+  # Instala o Node.js a partir do ZIP oficial numa pasta do usuario, sem exigir
+  # privilegios de admin (ao contrario do MSI). Adiciona ao PATH da sessao e
+  # ao PATH persistente do usuario.
+  Write-Host 'Instalando Node.js LTS (ZIP oficial, sem admin)...' -ForegroundColor Green
   $arch = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
-  # Endpoint estavel que aponta para o MSI da linha LTS mais recente.
-  $url = "https://nodejs.org/dist/latest-v$($script:RequiredNodeMajor).x/"
+  $base = "https://nodejs.org/dist/latest-v$($script:RequiredNodeMajor).x/"
   try {
-    $listing = (Invoke-WebRequest -UseBasicParsing -Uri $url).Content
+    $listing = (Invoke-WebRequest -UseBasicParsing -Uri $base).Content
   } catch {
-    Fail "Nao foi possivel acessar nodejs.org para baixar o Node.js. Instale Node.js LTS (>= v$($script:RequiredNodeMajor)) manualmente e rode novamente."
+    return $false
   }
-  $msiName = ([regex]::Matches($listing, "node-v[\d\.]+-$arch\.msi") | Select-Object -First 1).Value
-  if ([string]::IsNullOrWhiteSpace($msiName)) {
-    Fail "Nao foi possivel localizar o MSI do Node.js para $arch. Instale Node.js LTS manualmente."
+  $zipName = ([regex]::Matches($listing, "node-v[\d\.]+-win-$arch\.zip") | Select-Object -First 1).Value
+  if ([string]::IsNullOrWhiteSpace($zipName)) {
+    return $false
   }
-  $msiPath = Join-Path ([IO.Path]::GetTempPath()) $msiName
-  Download-WithRetry ($url + $msiName) $msiPath 'Node.js LTS'
-  Write-Host 'Instalando Node.js (pode pedir elevacao)...' -ForegroundColor Green
-  $proc = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msiPath`"", '/qn', '/norestart') -Wait -PassThru
-  Remove-Item -LiteralPath $msiPath -ErrorAction SilentlyContinue
-  return ($proc.ExitCode -eq 0)
+  $zipPath = Join-Path ([IO.Path]::GetTempPath()) $zipName
+  try {
+    Download-WithRetry ($base + $zipName) $zipPath 'Node.js LTS'
+  } catch {
+    return $false
+  }
+
+  $installRoot = Join-Path $env:LOCALAPPDATA 'OpenMatrix\node'
+  try {
+    if (Test-Path -LiteralPath $installRoot) {
+      Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $installRoot -Force
+  } catch {
+    Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+    return $false
+  }
+  Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+
+  # O ZIP extrai para uma subpasta node-vX.Y.Z-win-arch; achatamos para a raiz
+  # ($installRoot) para que o caminho do PATH seja estavel entre versoes (evita
+  # acumulo de entradas mortas no PATH a cada atualizacao do Node).
+  $inner = Get-ChildItem -LiteralPath $installRoot -Directory |
+    Where-Object { $_.Name -like 'node-v*' } | Select-Object -First 1
+  if ($inner) {
+    Get-ChildItem -LiteralPath $inner.FullName -Force | ForEach-Object {
+      Move-Item -LiteralPath $_.FullName -Destination $installRoot -Force
+    }
+    Remove-Item -LiteralPath $inner.FullName -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $nodeDir = $installRoot
+  if (-not (Test-Path -LiteralPath (Join-Path $nodeDir 'node.exe'))) {
+    return $false
+  }
+
+  # Adiciona ao PATH da sessao atual e persiste no PATH do usuario.
+  $env:Path = "$nodeDir$([IO.Path]::PathSeparator)$env:Path"
+  try {
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $parts = @()
+    if (-not [string]::IsNullOrWhiteSpace($userPath)) {
+      $parts = ($userPath -split [IO.Path]::PathSeparator) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    }
+    if (-not ($parts | Where-Object { $_.TrimEnd('\') -ieq $nodeDir.TrimEnd('\') })) {
+      $newUserPath = if ($parts.Count -gt 0) { ($parts + $nodeDir) -join [IO.Path]::PathSeparator } else { $nodeDir }
+      [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+    }
+  } catch {
+  }
+  return $true
 }
 
 function Ensure-Node() {
@@ -231,9 +281,11 @@ function Ensure-Node() {
     Write-Host "Node.js v$major e antigo (necessario >= v$($script:RequiredNodeMajor)). Atualizando..." -ForegroundColor Yellow
   }
 
-  $ok = Install-NodeViaWinget
+  # ZIP no diretorio do usuario primeiro (sem admin, confiavel); winget como
+  # alternativa rapida quando disponivel.
+  $ok = Install-NodeViaZip
   if (-not $ok) {
-    $ok = Install-NodeViaMsi
+    $ok = Install-NodeViaWinget
   }
   Refresh-EnvPath
 
