@@ -3,7 +3,7 @@ import type { Command } from '../../commands.js'
 const lsp = {
   type: 'local',
   name: 'lsp',
-  description: 'Inspect and set up Language Server Protocol code intelligence',
+  description: 'Inspeciona e configura a inteligência de código do Language Server Protocol',
   argumentHint:
     'status | recommend [path] | install <plugin-id> | uninstall <plugin-id> | restart',
   supportsNonInteractive: false,

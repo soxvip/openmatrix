@@ -3,7 +3,7 @@ import type { Command } from '../../commands.js'
 const stats = {
   type: 'local-jsx',
   name: 'stats',
-  description: 'Show your OPEN MATRIX usage statistics and activity',
+  description: 'Mostra suas estatísticas de uso e atividade do OPEN MATRIX',
   load: () => import('./stats.js'),
 } satisfies Command
 

@@ -16,49 +16,146 @@ function escapeHtml(value) {
 }
 
 
+// Catálogo PT de TODAS as descrições de comando do CLI OPEN MATRIX.
+// Mantido em sincronia (verbatim) com as descrições nos fontes do CLI
+// (src/commands/** e src/skills/bundled/**). Chaveado por nome de comando
+// SEM a barra inicial, pois o CLI envia apenas os nomes em system/init.
+const SLASH_COMMAND_DESCRIPTIONS = {
+  'add-dir': 'Adiciona um novo diretório de trabalho',
+  'advisor': 'Configura o modelo do advisor',
+  'agents': 'Gerencia configurações de agentes',
+  'auto-fix': 'Configura o auto-fix: roda lint/teste após edições da IA',
+  'batch': 'Pesquisa e planeja uma mudança em larga escala, depois executa em paralelo em 5–30 agentes worktree isolados que abrem um PR cada.',
+  'branch': 'Cria uma ramificação da conversa atual neste ponto',
+  'bridge-kick': 'Injeta estados de falha de bridge para teste manual de recuperação',
+  'brief': 'Alterna o modo somente-resumo',
+  'btw': 'Faz uma pergunta rápida paralela sem interromper a conversa principal',
+  'buddy': 'Choca, cuida e gerencia seu companheiro OPEN MATRIX',
+  'cache-probe': 'Envia requisições idênticas para testar o cache de prompt (resultados no log de debug)',
+  'cache-stats': 'Mostra estatísticas de acerto/erro de cache por turno e sessão (funciona em todos os provedores)',
+  'chrome': 'Configurações do Claude no Chrome (Beta)',
+  'clear': 'Limpa o histórico da conversa e libera contexto',
+  'color': 'Define a cor da barra de prompt para esta sessão',
+  'commit': 'Cria um commit git',
+  'commit-message': 'Configura o texto de atribuição do commit',
+  'commit-push-pr': 'Faz commit, push e abre um PR',
+  'compact': 'Limpa o histórico da conversa mas mantém um resumo no contexto. Opcional: /compact [instruções para o resumo]',
+  'config': 'Abre o painel de configuração',
+  'context': 'Visualiza o uso atual de contexto como uma grade colorida',
+  'copy': 'Copia a última resposta do Claude para a área de transferência (ou /copy N para a N-ésima mais recente)',
+  'cost': 'Mostra o custo total e a duração da sessão atual',
+  'debug': 'Ativa o log de debug para esta sessão e ajuda a diagnosticar problemas',
+  'desktop': 'Continua a sessão atual no Claude Desktop',
+  'diff': 'Visualiza alterações não commitadas e diffs por turno',
+  'doctor': 'Diagnostica e verifica sua instalação e configurações do OPEN MATRIX',
+  'dream': 'Executa a consolidação de memória — sintetiza sessões recentes em memórias duráveis',
+  'effort': 'Define o nível de esforço para uso do modelo',
+  'exit': 'Sai do REPL',
+  'export': 'Exporta a conversa atual para um arquivo ou área de transferência',
+  'extra-usage': 'Configura uso extra para continuar funcionando quando os limites forem atingidos',
+  'feedback': 'Envia feedback sobre o OPEN MATRIX',
+  'files': 'Lista todos os arquivos atualmente no contexto',
+  'heapdump': 'Despeja o heap JS em ~/Desktop',
+  'help': 'Mostra a ajuda e os comandos disponíveis',
+  'hooks': 'Visualiza as configurações de hooks para eventos de ferramentas',
+  'ide': 'Gerencia integrações de IDE e mostra o status',
+  'init': 'Inicializa um novo arquivo de instrução do projeto com documentação da base de código',
+  'init-verifiers': 'Cria skill(s) verificadora(s) para verificação automatizada de alterações de código',
+  'insights': 'Gera um relatório analisando suas sessões do OPEN MATRIX',
+  'install': 'Instala o build nativo do OPEN MATRIX',
+  'install-github-app': 'Configura o Claude GitHub Actions para um repositório',
+  'install-slack-app': 'Instala o app do Claude para Slack',
+  'keybindings': 'Abre ou cria seu arquivo de configuração de atalhos de teclado',
+  'knowledge': 'Gerencia o Grafo de Conhecimento nativo',
+  'logo': 'Altera o esquema de cores do logo de inicialização',
+  'logout': 'Sai da sua conta Anthropic',
+  'loop': 'Roda um prompt em intervalo fixo ou reagenda dinamicamente, incluindo loops simples de modo de manutenção.',
+  'lsp': 'Inspeciona e configura a inteligência de código do Language Server Protocol',
+  'mcp': 'Gerencia servidores MCP',
+  'memory': 'Edita os arquivos de memória do Claude',
+  'mobile': 'Mostra o QR code para baixar o app móvel do Claude',
+  'model': 'Define o modelo de IA do OPEN MATRIX',
+  'onboard-github': 'Configuração interativa do GitHub Copilot: login de dispositivo OAuth armazenado em armazenamento seguro',
+  'output-style': 'Obsoleto: use /config para alterar o estilo de saída',
+  'permissions': 'Gerencia regras de permissão de ferramentas (allow e deny)',
+  'plugin': 'Gerencia plugins do OPEN MATRIX',
+  'pr-comments': 'Obtém comentários de um pull request do GitHub',
+  'privacy-settings': 'Visualiza e atualiza suas configurações de privacidade',
+  'provider': 'Gerencia perfis de provedores de API',
+  'rate-limit-options': 'Mostra opções quando o limite de taxa é atingido',
+  'release-notes': 'Visualiza as notas de versão',
+  'reload-plugins': 'Ativa mudanças de plugin pendentes na sessão atual',
+  'remote-control': 'Conecta este terminal para sessões de controle remoto',
+  'remote-env': 'Configura o ambiente remoto padrão para sessões de teleport',
+  'rename': 'Renomeia a conversa atual',
+  'request-size': 'Mostra a carga estimada de contexto da requisição e os maiores contribuidores',
+  'resume': 'Retoma uma conversa anterior',
+  'review': 'Revisa um pull request',
+  'rewind': 'Restaura o código e/ou a conversa para um ponto anterior',
+  'security-review': 'Faz uma revisão de segurança das alterações pendentes no branch atual',
+  'session': 'Mostra a URL da sessão remota e o QR code',
+  'simplify': 'Revisa o código alterado para reúso, qualidade e eficiência, depois corrige os problemas encontrados.',
+  'skills': 'Lista as skills disponíveis',
+  'stats': 'Mostra suas estatísticas de uso e atividade do OPEN MATRIX',
+  'status': 'Mostra o status do OPEN MATRIX incluindo versão, modelo, conta, conectividade de API e status das ferramentas',
+  'statusline': 'Configura a UI da linha de status do OPEN MATRIX',
+  'stickers': 'Encomenda adesivos do OPEN MATRIX',
+  'tasks': 'Lista e gerencia tarefas em segundo plano',
+  'terminal-setup': 'Instala o atalho Shift+Enter para novas linhas',
+  'theme': 'Altera o tema',
+  'think-back': 'Sua Retrospectiva do Ano 2025 no OPEN MATRIX',
+  'thinkback-play': 'Reproduz a animação do thinkback',
+  'ultraplan': 'O OPEN MATRIX na web rascunha um plano avançado que você pode editar e aprovar',
+  'ultrareview': 'Encontra e verifica bugs no seu branch. Roda no OPEN MATRIX na web',
+  'update-config': 'Use esta skill para configurar o harness do Claude Code via settings.json. Comportamentos automáticos ("from now on when X", "each time X", "whenever X", "before/after X") exigem hooks configurados em settings.json - quem executa é o harness, não o Claude, então memória/preferências não conseguem cumpri-los. Use também para: permissões ("allow X", "add permission", "move permission to"), variáveis de ambiente ("set X=Y"), troubleshooting de hooks, ou qualquer alteração nos arquivos settings.json/settings.local.json. Exemplos: "allow npm commands", "add bq permission to global settings", "move permission to user settings", "set DEBUG=true", "when claude stops show X". Para configurações simples como tema/modelo, use a ferramenta Config.',
+  'upgrade': 'Faz upgrade para o Max para limites de taxa maiores e mais Opus',
+  'usage': 'Mostra os limites de uso do plano',
+  'vim': 'Alterna entre os modos de edição Vim e Normal',
+  'voice': 'Alterna o modo de voz',
+  'wiki': 'Inicializa e inspeciona a wiki do projeto OPEN MATRIX',
+};
+
+// Descrição de fallback quando um comando da CLI não está no catálogo acima.
+const SLASH_COMMAND_FALLBACK_DESCRIPTION = 'Comando da CLI OPEN MATRIX';
+
+function lookupSlashDescription(command) {
+  const name = String(command || '').replace(/^[/]/, '');
+  return SLASH_COMMAND_DESCRIPTIONS[name] || SLASH_COMMAND_FALLBACK_DESCRIPTION;
+}
+
+// Comandos "favoritos" — exibidos no topo da paleta. Inclui comandos
+// exclusivos da extensão (/full, /safe, /plan, /compact) que não existem no CLI.
 const FAVORITE_SLASH_COMMANDS = [
-  { command: '/full', description: 'Ativar Poder total (tools default + bypassPermissions)', local: true },
-  { command: '/safe', description: 'Modo seguro: auto-aprova edicoes, reduz risco', local: true },
-  { command: '/plan', description: 'Modo planejamento: sem edicoes de arquivo', local: true },
-  { command: '/model', description: 'Trocar o modelo da LLM (respeita o token ativo)', local: true },
-  { command: '/cost', description: 'Mostrar custo e uso da sessao' },
-  { command: '/context', description: 'Mostrar contexto carregado' },
-  { command: '/compact', description: 'Compactar conversa/contexto' },
-  { command: '/review', description: 'Revisar alteracoes do projeto' },
-  { command: '/security-review', description: 'Revisao de seguranca' },
-  { command: '/commit-message', description: 'Configurar ou gerar mensagem de commit', requiresArgument: true, argumentHint: 'status | default | off | set "..."' },
-  { command: '/init', description: 'Criar/atualizar memoria e config do projeto' },
-  { command: '/auto-fix', description: 'Configurar auto-fix apos edicoes' },
-  { command: '/debug', description: 'Ativar filtro de debug', requiresArgument: true, argumentHint: 'api,hooks | !file' },
-  { command: '/update-config', description: 'Atualizar configuracao', requiresArgument: true, argumentHint: '<configuracao>' },
+  { command: '/full', description: 'Ativa o Poder total (tools default + bypassPermissions)', local: true },
+  { command: '/safe', description: 'Modo seguro: auto-aprova edições, reduz risco', local: true },
+  { command: '/plan', description: 'Modo planejamento: sem edições de arquivo', local: true },
+  { command: '/compact', description: 'Compacta a conversa/contexto', local: true },
+  { command: '/model', description: 'Define o modelo de IA do OPEN MATRIX (respeita o token ativo)', local: true },
+  { command: '/cost', description: SLASH_COMMAND_DESCRIPTIONS['cost'] },
+  { command: '/context', description: SLASH_COMMAND_DESCRIPTIONS['context'] },
+  { command: '/review', description: SLASH_COMMAND_DESCRIPTIONS['review'] },
+  { command: '/security-review', description: SLASH_COMMAND_DESCRIPTIONS['security-review'] },
+  { command: '/commit-message', description: SLASH_COMMAND_DESCRIPTIONS['commit-message'], requiresArgument: true, argumentHint: 'status | default | off | set "..."' },
+  { command: '/init', description: SLASH_COMMAND_DESCRIPTIONS['init'] },
+  { command: '/auto-fix', description: SLASH_COMMAND_DESCRIPTIONS['auto-fix'] },
+  { command: '/debug', description: SLASH_COMMAND_DESCRIPTIONS['debug'], requiresArgument: true, argumentHint: '[descrição do problema]' },
+  { command: '/update-config', description: SLASH_COMMAND_DESCRIPTIONS['update-config'], requiresArgument: true, argumentHint: '<configuracao>' },
+  { command: '/dream', description: SLASH_COMMAND_DESCRIPTIONS['dream'] },
+  { command: '/insights', description: SLASH_COMMAND_DESCRIPTIONS['insights'] },
+  { command: '/agents', description: SLASH_COMMAND_DESCRIPTIONS['agents'] },
+  { command: '/add-dir', description: SLASH_COMMAND_DESCRIPTIONS['add-dir'] },
 ];
 
 const SLASH_COMMAND_METADATA = new Map(
   FAVORITE_SLASH_COMMANDS.map(item => [item.command, item]),
 );
 
+// Seed exibida antes de a sessão da CLI enviar system/init. Contém TODOS os
+// comandos do CLI (mais os exclusivos da extensão) para que a paleta já
+// apareça completa mesmo antes da primeira mensagem.
 const DEFAULT_DYNAMIC_SLASH_COMMANDS = [
-  'update-config',
-  'debug',
-  'simplify',
-  'batch',
-  'loop',
-  'auto-fix',
-  'cache-stats',
-  'compact',
-  'commit-message',
-  'context',
-  'cost',
-  'dream',
-  'heapdump',
-  'init',
-  'knowledge',
-  'pr-comments',
-  'release-notes',
-  'request-size',
-  'review',
-  'security-review',
-  'insights',
+  ...FAVORITE_SLASH_COMMANDS.map(item => item.command.replace(/^[/]/, '')),
+  ...Object.keys(SLASH_COMMAND_DESCRIPTIONS),
 ];
 
 function normalizeSlashCommand(value) {
@@ -86,7 +183,7 @@ function buildSlashCommandItems(dynamicCommands = []) {
     const meta = SLASH_COMMAND_METADATA.get(command) || {};
     result.push({
       command,
-      description: meta.description || 'Comando da CLI OPEN MATRIX',
+      description: meta.description || lookupSlashDescription(command),
       source: 'cli',
       requiresArgument: Boolean(meta.requiresArgument),
       argumentHint: meta.argumentHint || '',
@@ -1139,6 +1236,8 @@ function renderChatHtml({ nonce, platform }) {
   let slashVisibleItems = [];
   let pendingAttachments = [];
   const favoriteSlashItems = ${JSON.stringify(buildSlashCommandItems([]))};
+  const slashCommandDescriptions = ${JSON.stringify(SLASH_COMMAND_DESCRIPTIONS)};
+  const slashCommandFallbackDescription = ${JSON.stringify(SLASH_COMMAND_FALLBACK_DESCRIPTION)};
   const toolResultMap = {};
 
   /* ── Markdown renderer ── */
@@ -1280,7 +1379,9 @@ function renderChatHtml({ nonce, platform }) {
   function getSlashCommandDescription(raw, command) {
     if (raw && typeof raw === 'object' && raw.description) return String(raw.description);
     const favorite = favoriteSlashItems.find(item => item.command === command);
-    return favorite ? favorite.description : 'Comando da CLI OPEN MATRIX';
+    if (favorite) return favorite.description;
+    const name = String(command || '').replace(/^[/]/, '');
+    return slashCommandDescriptions[name] || slashCommandFallbackDescription;
   }
 
   function buildSlashItemsRuntime(dynamicCommands) {

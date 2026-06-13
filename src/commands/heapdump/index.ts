@@ -3,7 +3,7 @@ import type { Command } from '../../commands.js'
 const heapDump = {
   type: 'local',
   name: 'heapdump',
-  description: 'Dump the JS heap to ~/Desktop',
+  description: 'Despeja o heap JS em ~/Desktop',
   isHidden: true,
   supportsNonInteractive: true,
   load: () => import('./heapdump.js'),

@@ -5,7 +5,7 @@ import { isEnvTruthy } from '../../utils/envUtils.js'
 const upgrade = {
   type: 'local-jsx',
   name: 'upgrade',
-  description: 'Upgrade to Max for higher rate limits and more Opus',
+  description: 'Faz upgrade para o Max para limites de taxa maiores e mais Opus',
   availability: ['claude-ai'],
   isEnabled: () =>
     !isEnvTruthy(process.env.DISABLE_UPGRADE_COMMAND) &&

@@ -4,7 +4,7 @@ import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../../services/anal
 const thinkback = {
   type: 'local-jsx',
   name: 'think-back',
-  description: 'Your 2025 OPEN MATRIX Year in Review',
+  description: 'Sua Retrospectiva do Ano 2025 no OPEN MATRIX',
   isEnabled: () =>
     checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_thinkback'),
   load: () => import('./thinkback.js'),

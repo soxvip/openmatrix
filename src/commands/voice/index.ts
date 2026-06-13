@@ -7,7 +7,7 @@ import {
 const voice = {
   type: 'local',
   name: 'voice',
-  description: 'Toggle voice mode',
+  description: 'Alterna o modo de voz',
   availability: ['claude-ai'],
   isEnabled: () => isVoiceGrowthBookEnabled(),
   get isHidden() {

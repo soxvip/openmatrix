@@ -2,7 +2,7 @@ import type { Command } from '../../commands.js'
 
 const command = {
   name: 'vim',
-  description: 'Toggle between Vim and Normal editing modes',
+  description: 'Alterna entre os modos de edição Vim e Normal',
   supportsNonInteractive: false,
   type: 'local',
   load: () => import('./vim.js'),

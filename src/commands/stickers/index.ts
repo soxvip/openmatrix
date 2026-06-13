@@ -3,7 +3,7 @@ import type { Command } from '../../commands.js'
 const stickers = {
   type: 'local',
   name: 'stickers',
-  description: 'Order OPEN MATRIX stickers',
+  description: 'Encomenda adesivos do OPEN MATRIX',
   supportsNonInteractive: false,
   load: () => import('./stickers.js'),
 } satisfies Command

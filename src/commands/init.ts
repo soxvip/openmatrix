@@ -229,8 +229,8 @@ const command = {
   name: 'init',
   get description() {
     return isNewInitEnabled()
-      ? 'Initialize new project instruction file(s) and optional skills/hooks with codebase documentation'
-      : 'Initialize a new project instruction file with codebase documentation'
+      ? 'Inicializa novo(s) arquivo(s) de instrução do projeto e skills/hooks opcionais com documentação da base de código'
+      : 'Inicializa um novo arquivo de instrução do projeto com documentação da base de código'
   },
   contentLength: 0, // Dynamic content
   progressMessage: 'analyzing your codebase',

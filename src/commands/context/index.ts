@@ -3,7 +3,7 @@ import type { Command } from '../../commands.js'
 
 export const context: Command = {
   name: 'context',
-  description: 'Visualize current context usage as a colored grid',
+  description: 'Visualiza o uso atual de contexto como uma grade colorida',
   isEnabled: () => !getIsNonInteractiveSession(),
   type: 'local-jsx',
   load: () => import('./context.js'),
@@ -13,7 +13,7 @@ export const contextNonInteractive: Command = {
   type: 'local',
   name: 'context',
   supportsNonInteractive: true,
-  description: 'Show current context usage',
+  description: 'Mostra o uso atual de contexto',
   get isHidden() {
     return !getIsNonInteractiveSession()
   },

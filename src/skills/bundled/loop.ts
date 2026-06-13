@@ -205,7 +205,7 @@ export function registerLoopSkill(): void {
   registerBundledSkill({
     name: 'loop',
     description:
-      'Run a prompt on a fixed interval or dynamically reschedule it, including bare maintenance-mode loops.',
+      'Roda um prompt em intervalo fixo ou reagenda dinamicamente, incluindo loops simples de modo de manutenção.',
     whenToUse:
       'When the user wants to poll for status, babysit a workflow, run recurring maintenance, or keep re-running a prompt within the current session.',
     argumentHint: '[interval] [prompt]',

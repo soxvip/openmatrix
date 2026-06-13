@@ -4,7 +4,7 @@ import { isClaudeAISubscriber } from '../../utils/auth.js'
 const rateLimitOptions = {
   type: 'local-jsx',
   name: 'rate-limit-options',
-  description: 'Show options when rate limit is reached',
+  description: 'Mostra opções quando o limite de taxa é atingido',
   isEnabled: () => {
     if (!isClaudeAISubscriber()) {
       return false

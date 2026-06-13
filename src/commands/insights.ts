@@ -2836,7 +2836,7 @@ function safeKeys(obj: Record<string, unknown> | undefined | null): string[] {
 const usageReport: Command = {
   type: 'prompt',
   name: 'insights',
-  description: 'Generate a report analyzing your OPEN MATRIX sessions',
+  description: 'Gera um relatório analisando suas sessões do OPEN MATRIX',
   contentLength: 0, // Dynamic content
   progressMessage: 'analyzing your sessions',
   source: 'builtin',

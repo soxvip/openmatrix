@@ -3,7 +3,7 @@ const feedback = {
   aliases: ['bug'],
   type: 'local-jsx',
   name: 'feedback',
-  description: `Submit feedback about OPEN MATRIX`,
+  description: `Envia feedback sobre o OPEN MATRIX`,
   argumentHint: '[report]',
   isEnabled: () => false,
   load: () => import('./feedback.js'),

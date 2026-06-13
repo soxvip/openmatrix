@@ -14,8 +14,8 @@ export function registerDebugSkill(): void {
     name: 'debug',
     description:
       process.env.USER_TYPE === 'ant'
-        ? 'Debug your current Claude Code session by reading the session debug log. Includes all event logging'
-        : 'Enable debug logging for this session and help diagnose issues',
+        ? 'Depura sua sessão atual do Claude Code lendo o log de debug da sessão. Inclui todo o registro de eventos'
+        : 'Ativa o log de debug para esta sessão e ajuda a diagnosticar problemas',
     allowedTools: ['Read', 'Grep', 'Glob'],
     argumentHint: '[issue description]',
     // disableModelInvocation so that the user has to explicitly request it in

@@ -3,7 +3,7 @@ import { isEnvTruthy } from '../../utils/envUtils.js'
 
 const doctor: Command = {
   name: 'doctor',
-  description: 'Diagnose and verify your OPEN MATRIX installation and settings',
+  description: 'Diagnostica e verifica sua instalação e configurações do OPEN MATRIX',
   isEnabled: () => !isEnvTruthy(process.env.DISABLE_DOCTOR_COMMAND),
   type: 'local-jsx',
   load: () => import('./doctor.js'),

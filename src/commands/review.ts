@@ -33,7 +33,7 @@ const LOCAL_REVIEW_PROMPT = (args: string) => `
 const review: Command = {
   type: 'prompt',
   name: 'review',
-  description: 'Review a pull request',
+  description: 'Revisa um pull request',
   progressMessage: 'reviewing pull request',
   contentLength: 0,
   source: 'builtin',
@@ -48,7 +48,7 @@ const review: Command = {
 const ultrareview: Command = {
   type: 'local-jsx',
   name: 'ultrareview',
-  description: `~10–20 min · Finds and verifies bugs in your branch. Runs in OPEN MATRIX on the web. See ${CCR_TERMS_URL}`,
+  description: `~10–20 min · Encontra e verifica bugs no seu branch. Roda no OPEN MATRIX na web. Veja ${CCR_TERMS_URL}`,
   isEnabled: () => isUltrareviewEnabled(),
   load: () => import('./review/ultrareviewCommand.js'),
 }

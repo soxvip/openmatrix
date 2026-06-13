@@ -4,7 +4,7 @@ const status = {
   type: 'local-jsx',
   name: 'status',
   description:
-    'Show OPEN MATRIX status including version, model, account, API connectivity, and tool statuses',
+    'Mostra o status do OPEN MATRIX incluindo versão, modelo, conta, conectividade de API e status das ferramentas',
   immediate: true,
   load: () => import('./status.js'),
 } satisfies Command

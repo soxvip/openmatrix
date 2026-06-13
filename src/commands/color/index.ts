@@ -7,7 +7,7 @@ import type { Command } from '../../commands.js'
 const color = {
   type: 'local-jsx',
   name: 'color',
-  description: 'Set the prompt bar color for this session',
+  description: 'Define a cor da barra de prompt para esta sessão',
   immediate: true,
   argumentHint: '<color|default>',
   load: () => import('./color.js'),

@@ -14,7 +14,7 @@ const command = {
   type: 'prompt',
   name: 'dream',
   description:
-    'Run memory consolidation — synthesize recent sessions into durable memories',
+    'Executa a consolidação de memória — sintetiza sessões recentes em memórias duráveis',
   isEnabled: () => isAutoMemoryEnabled(),
   progressMessage: 'consolidating memories',
   contentLength: 0,

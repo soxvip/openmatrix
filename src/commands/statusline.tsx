@@ -3,7 +3,7 @@ import type { Command } from '../commands.js';
 import { AGENT_TOOL_NAME } from '../tools/AgentTool/constants.js';
 const statusline = {
   type: 'prompt',
-  description: "Set up OPEN MATRIX's status line UI",
+  description: 'Configura a UI da linha de status do OPEN MATRIX',
   contentLength: 0,
   // Dynamic content
   aliases: [],

@@ -3,7 +3,7 @@ import type { Command } from '../../commands.js'
 const hooks = {
   type: 'local-jsx',
   name: 'hooks',
-  description: 'View hook configurations for tool events',
+  description: 'Visualiza as configurações de hooks para eventos de ferramentas',
   immediate: true,
   load: () => import('./hooks.js'),
 } satisfies Command

@@ -201,7 +201,7 @@ import stats from './commands/stats/index.js'
 const usageReport: Command = {
   type: 'prompt',
   name: 'insights',
-  description: 'Generate a report analyzing your OPEN MATRIX sessions',
+  description: 'Gera um relatório analisando suas sessões do OPEN MATRIX',
   contentLength: 0,
   progressMessage: 'analyzing your sessions',
   source: 'builtin',

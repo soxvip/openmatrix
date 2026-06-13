@@ -7,7 +7,7 @@ const branch = {
   // not part of this build (unmirrored source), and FORK_SUBAGENT's forking is
   // implicit (omitting subagent_type), not a slash command.
   aliases: ['fork'],
-  description: 'Create a branch of the current conversation at this point',
+  description: 'Cria uma ramificação da conversa atual neste ponto',
   argumentHint: '[name]',
   load: () => import('./branch.js'),
 } satisfies Command

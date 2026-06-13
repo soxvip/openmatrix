@@ -12,7 +12,7 @@ const logo = {
   get description(): string {
     const current = getGlobalConfig().logoColor
     const shown = isLogoPaletteName(current) ? current : DEFAULT_LOGO_PALETTE
-    return `Change the startup logo color scheme (current: ${LOGO_PALETTE_LABELS[shown]})`
+    return `Altera o esquema de cores do logo de inicialização (atual: ${LOGO_PALETTE_LABELS[shown]})`
   },
   isHidden: false,
   load: () => import('./logo.js'),

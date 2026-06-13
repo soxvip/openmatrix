@@ -5,7 +5,7 @@ const cacheProbe: Command = {
   type: 'local',
   name: 'cache-probe',
   description:
-    'Send identical requests to test prompt caching (results in debug log)',
+    'Envia requisições idênticas para testar o cache de prompt (resultados no log de debug)',
   argumentHint: '[model] [--no-key]',
   isEnabled: () =>
     isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI) ||

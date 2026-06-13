@@ -13,7 +13,7 @@ const bridge = {
   type: 'local-jsx',
   name: 'remote-control',
   aliases: ['rc'],
-  description: 'Connect this terminal for remote-control sessions',
+  description: 'Conecta este terminal para sessões de controle remoto',
   argumentHint: '[name]',
   isEnabled,
   get isHidden() {

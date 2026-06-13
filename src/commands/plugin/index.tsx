@@ -3,7 +3,7 @@ const plugin = {
   type: 'local-jsx',
   name: 'plugin',
   aliases: ['plugins', 'marketplace'],
-  description: 'Manage OPEN MATRIX plugins',
+  description: 'Gerencia plugins do OPEN MATRIX',
   immediate: true,
   load: () => import('./plugin.js')
 } satisfies Command;

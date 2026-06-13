@@ -16,7 +16,7 @@ const cacheStats = {
   type: 'local',
   name: 'cache-stats',
   description:
-    'Show per-turn and session cache hit/miss stats (works across all providers)',
+    'Mostra estatísticas de acerto/erro de cache por turno e sessão (funciona em todos os provedores)',
   supportsNonInteractive: true,
   load: () => import('./cacheStats.js'),
 } satisfies Command
