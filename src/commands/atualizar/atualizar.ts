@@ -1,5 +1,9 @@
 import { execFileNoThrow } from '../../utils/execFileNoThrow.js'
 import type { LocalCommandResult } from '../../types/command.js'
+import { writeFile, unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 const CLI_TGZ_WIN =
   'https://github.com/soxvip/openmatrix/releases/latest/download/open-matrix-cli-win.tgz'
@@ -48,9 +52,32 @@ async function updateCli(lines: string[]): Promise<void> {
   }
 }
 
+// `code/antigravity-ide --install-extension` aceita apenas um caminho .vsix
+// local ou um ID do marketplace — NÃO uma URL. Por isso baixamos o .vsix para
+// um arquivo temporário e instalamos a partir dele, espelhando os instaladores.
+async function downloadVsix(lines: string[]): Promise<string | null> {
+  const dest = join(tmpdir(), `open-matrix-vscode-${randomUUID()}.vsix`)
+  try {
+    const res = await fetch(VSIX_URL, { redirect: 'follow' })
+    if (!res.ok) {
+      lines.push(`• Falha ao baixar a extensão (HTTP ${res.status}).`)
+      return null
+    }
+    const buf = Buffer.from(await res.arrayBuffer())
+    await writeFile(dest, buf)
+    return dest
+  } catch (err) {
+    lines.push(
+      `• Falha ao baixar a extensão: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    return null
+  }
+}
+
 async function updateExtensionFor(
   bin: string,
   label: string,
+  vsixPath: string,
   lines: string[],
 ): Promise<void> {
   // Verifica se o editor está disponível no PATH antes de tentar instalar.
@@ -62,15 +89,30 @@ async function updateExtensionFor(
   lines.push(`• Atualizando extensão no ${label} ...`)
   const result = await runTool(
     bin,
-    ['--install-extension', VSIX_URL, '--force'],
+    ['--install-extension', vsixPath, '--force'],
     STEP_TIMEOUT,
   )
   if (result.code === 0) {
     lines.push(`  ✓ Extensão atualizada no ${label}.`)
   } else {
     lines.push(
-      `  ✗ Falha ao atualizar a extensão no ${label} (código ${result.code}).`,
+      `  ✗ Falha ao atualizar a extensão no ${label} (código ${result.code}). ${
+        (result.stderr || result.error || '').trim().split('\n').slice(-1)[0] ?? ''
+      }`,
     )
+  }
+}
+
+async function updateExtensions(lines: string[]): Promise<void> {
+  const vsixPath = await downloadVsix(lines)
+  if (!vsixPath) {
+    return
+  }
+  try {
+    await updateExtensionFor('code', 'VS Code', vsixPath, lines)
+    await updateExtensionFor('antigravity-ide', 'Antigravity', vsixPath, lines)
+  } finally {
+    await unlink(vsixPath).catch(() => {})
   }
 }
 
@@ -78,8 +120,7 @@ export async function call(): Promise<LocalCommandResult> {
   const lines: string[] = ['Atualizando OPEN MATRIX para a versão mais recente do GitHub...', '']
 
   await updateCli(lines)
-  await updateExtensionFor('code', 'VS Code', lines)
-  await updateExtensionFor('antigravity-ide', 'Antigravity', lines)
+  await updateExtensions(lines)
 
   lines.push('')
   lines.push(
