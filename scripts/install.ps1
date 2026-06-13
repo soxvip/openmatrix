@@ -155,9 +155,98 @@ function Resolve-InstallPackage($InstallSpec) {
   return [pscustomobject]@{ Spec = $InstallSpec; Temp = $null }
 }
 
+$script:RequiredNodeMajor = 22
+
+function Refresh-EnvPath() {
+  # Recarrega o PATH (Machine + User) na sessao atual, para que node/npm
+  # recem-instalados fiquem disponiveis sem reabrir o terminal.
+  try {
+    $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $combined = @($machine, $user) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    if ($combined.Count -gt 0) {
+      $env:Path = ($combined -join [IO.Path]::PathSeparator)
+    }
+  } catch {
+  }
+}
+
+function Get-NodeMajorVersion() {
+  $node = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $node) {
+    return $null
+  }
+  try {
+    $raw = (& node -v 2>$null | Select-Object -First 1)
+  } catch {
+    return $null
+  }
+  if ($raw -match 'v?(\d+)\.') {
+    return [int]$Matches[1]
+  }
+  return $null
+}
+
+function Install-NodeViaWinget() {
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    return $false
+  }
+  Write-Host 'Instalando Node.js LTS via winget...' -ForegroundColor Green
+  & winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Install-NodeViaMsi() {
+  Write-Host 'winget indisponivel. Baixando o instalador oficial do Node.js...' -ForegroundColor Green
+  $arch = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
+  # Endpoint estavel que aponta para o MSI da linha LTS mais recente.
+  $url = "https://nodejs.org/dist/latest-v$($script:RequiredNodeMajor).x/"
+  try {
+    $listing = (Invoke-WebRequest -UseBasicParsing -Uri $url).Content
+  } catch {
+    Fail "Nao foi possivel acessar nodejs.org para baixar o Node.js. Instale Node.js LTS (>= v$($script:RequiredNodeMajor)) manualmente e rode novamente."
+  }
+  $msiName = ([regex]::Matches($listing, "node-v[\d\.]+-$arch\.msi") | Select-Object -First 1).Value
+  if ([string]::IsNullOrWhiteSpace($msiName)) {
+    Fail "Nao foi possivel localizar o MSI do Node.js para $arch. Instale Node.js LTS manualmente."
+  }
+  $msiPath = Join-Path ([IO.Path]::GetTempPath()) $msiName
+  Download-WithRetry ($url + $msiName) $msiPath 'Node.js LTS'
+  Write-Host 'Instalando Node.js (pode pedir elevacao)...' -ForegroundColor Green
+  $proc = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msiPath`"", '/qn', '/norestart') -Wait -PassThru
+  Remove-Item -LiteralPath $msiPath -ErrorAction SilentlyContinue
+  return ($proc.ExitCode -eq 0)
+}
+
+function Ensure-Node() {
+  $major = Get-NodeMajorVersion
+  if ($null -ne $major -and $major -ge $script:RequiredNodeMajor) {
+    Write-Host "Node.js detectado (v$major). OK." -ForegroundColor DarkGreen
+    return
+  }
+
+  if ($null -eq $major) {
+    Write-Host 'Node.js nao encontrado. Instalando...' -ForegroundColor Yellow
+  } else {
+    Write-Host "Node.js v$major e antigo (necessario >= v$($script:RequiredNodeMajor)). Atualizando..." -ForegroundColor Yellow
+  }
+
+  $ok = Install-NodeViaWinget
+  if (-not $ok) {
+    $ok = Install-NodeViaMsi
+  }
+  Refresh-EnvPath
+
+  $major = Get-NodeMajorVersion
+  if ($null -eq $major -or $major -lt $script:RequiredNodeMajor) {
+    Fail "Falha ao instalar o Node.js LTS (>= v$($script:RequiredNodeMajor)). Instale manualmente em https://nodejs.org e rode este instalador novamente."
+  }
+  Write-Host "Node.js v$major instalado/atualizado com sucesso." -ForegroundColor Green
+}
+
 function Install-OpenMatrixCliPackage($PackageFile) {
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Fail 'node nao encontrado. Instale Node.js LTS e rode este instalador novamente.'
+    Fail 'node nao encontrado mesmo apos a tentativa de instalacao. Instale Node.js LTS e rode novamente.'
   }
 
   Write-Host 'Instalando OPEN MATRIX no npm global...'
@@ -172,8 +261,15 @@ $installMode = Show-InstallMenu
 
 Write-Host 'OPEN MATRIX installer for Windows' -ForegroundColor Green
 
+# Garante Node.js LTS (>= v22) instalado/atualizado nos caminhos do sistema
+# antes de qualquer uso de npm. Isso faz o ambiente do cliente espelhar o dev.
+Ensure-Node
+
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-  Fail 'npm nao encontrado. Instale Node.js LTS e rode este instalador novamente.'
+  Refresh-EnvPath
+}
+if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+  Fail 'npm nao encontrado mesmo apos instalar o Node.js. Reabra o terminal e rode novamente.'
 }
 
 function Add-NpmGlobalPrefixToPath() {

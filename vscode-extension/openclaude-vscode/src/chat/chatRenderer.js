@@ -24,6 +24,7 @@ const SLASH_COMMAND_DESCRIPTIONS = {
   'add-dir': 'Adiciona um novo diretório de trabalho',
   'advisor': 'Configura o modelo do advisor',
   'agents': 'Gerencia configurações de agentes',
+  'atualizar': 'Atualiza o CLI e a extensão para a versão mais recente do GitHub',
   'auto-fix': 'Configura o auto-fix: roda lint/teste após edições da IA',
   'batch': 'Pesquisa e planeja uma mudança em larga escala, depois executa em paralelo em 5–30 agentes worktree isolados que abrem um PR cada.',
   'branch': 'Cria uma ramificação da conversa atual neste ponto',
@@ -144,6 +145,7 @@ const FAVORITE_SLASH_COMMANDS = [
   { command: '/insights', description: SLASH_COMMAND_DESCRIPTIONS['insights'] },
   { command: '/agents', description: SLASH_COMMAND_DESCRIPTIONS['agents'] },
   { command: '/add-dir', description: SLASH_COMMAND_DESCRIPTIONS['add-dir'] },
+  { command: '/atualizar', description: SLASH_COMMAND_DESCRIPTIONS['atualizar'] },
 ];
 
 const SLASH_COMMAND_METADATA = new Map(

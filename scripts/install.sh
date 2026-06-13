@@ -254,7 +254,78 @@ install_mode="$(show_install_menu)"
 
 printf 'OPEN MATRIX installer for macOS/Linux\n'
 
-command -v npm >/dev/null 2>&1 || fail 'npm nao encontrado. Instale Node.js LTS e rode este instalador novamente.'
+REQUIRED_NODE_MAJOR=22
+
+node_major_version() {
+  command -v node >/dev/null 2>&1 || return 1
+  node -v 2>/dev/null | sed -E 's/^v?([0-9]+)\..*/\1/'
+}
+
+install_node() {
+  os="$(uname -s)"
+  if [ "$os" = "Darwin" ]; then
+    if command -v brew >/dev/null 2>&1; then
+      printf 'Instalando Node.js LTS via Homebrew...\n'
+      brew install node >/dev/null 2>&1 || brew upgrade node >/dev/null 2>&1 || true
+      return 0
+    fi
+    printf 'Homebrew nao encontrado. Instalando via tarball oficial...\n'
+  fi
+
+  # Linux: tenta gerenciador nativo, depois cai para tarball oficial.
+  if [ "$os" = "Linux" ]; then
+    if command -v apt-get >/dev/null 2>&1; then
+      printf 'Instalando Node.js LTS via NodeSource/apt...\n'
+      if curl -fsSL "https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x" | sudo -E bash - >/dev/null 2>&1; then
+        sudo apt-get install -y nodejs >/dev/null 2>&1 && return 0
+      fi
+    elif command -v dnf >/dev/null 2>&1; then
+      sudo dnf install -y nodejs >/dev/null 2>&1 && return 0
+    fi
+  fi
+
+  # Fallback universal: tarball oficial em /usr/local.
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) narch='x64' ;;
+    arm64|aarch64) narch='arm64' ;;
+    *) fail "Arquitetura $arch nao suportada para instalacao automatica do Node.js. Instale Node.js LTS (>= v${REQUIRED_NODE_MAJOR}) manualmente." ;;
+  esac
+  if [ "$os" = "Darwin" ]; then nos='darwin'; else nos='linux'; fi
+  base="https://nodejs.org/dist/latest-v${REQUIRED_NODE_MAJOR}.x"
+  fname="$(curl -fsSL "$base/" | grep -oE "node-v[0-9.]+-${nos}-${narch}\.tar\.gz" | head -n1)"
+  [ -n "$fname" ] || fail "Nao foi possivel localizar o tarball do Node.js para ${nos}-${narch}. Instale Node.js LTS manualmente."
+  tmp_node="${TMPDIR:-/tmp}/${fname}"
+  temp_files+=("$tmp_node")
+  download_with_retry "$base/$fname" "$tmp_node" 'Node.js LTS'
+  printf 'Instalando Node.js em /usr/local (pode pedir sudo)...\n'
+  sudo tar -xzf "$tmp_node" -C /usr/local --strip-components=1
+}
+
+ensure_node() {
+  major="$(node_major_version || true)"
+  if [ -n "$major" ] && [ "$major" -ge "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
+    printf 'Node.js detectado (v%s). OK.\n' "$major"
+    return 0
+  fi
+  if [ -z "$major" ]; then
+    printf 'Node.js nao encontrado. Instalando...\n'
+  else
+    printf 'Node.js v%s e antigo (necessario >= v%s). Atualizando...\n' "$major" "$REQUIRED_NODE_MAJOR"
+  fi
+  install_node
+  hash -r 2>/dev/null || true
+  major="$(node_major_version || true)"
+  if [ -z "$major" ] || [ "$major" -lt "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then
+    fail "Falha ao instalar Node.js LTS (>= v${REQUIRED_NODE_MAJOR}). Instale manualmente em https://nodejs.org e rode novamente."
+  fi
+  printf 'Node.js v%s instalado/atualizado com sucesso.\n' "$major"
+}
+
+# Garante Node.js LTS antes de usar npm, espelhando o ambiente de dev.
+ensure_node
+
+command -v npm >/dev/null 2>&1 || fail 'npm nao encontrado mesmo apos instalar o Node.js. Reabra o terminal e rode novamente.'
 
 install_spec="${OPEN_MATRIX_PACKAGE_SPEC:-}"
 if [ -z "$install_spec" ]; then
