@@ -11,24 +11,13 @@ const VSIX_URL =
 const SECONDS = 1000
 const STEP_TIMEOUT = 300 * SECONDS
 
-const isWindows = process.platform === 'win32'
-
-// No Windows, `npm`, `code` e `antigravity-ide` sao shims `.cmd`/`.bat` e o
-// spawn (shell:false) usado por execFileNoThrow nao consegue executa-los
-// diretamente (ENOENT). Roteamos via `cmd.exe /c` para resolver o shim na
-// PATH. Em outros SOs, chamamos o binario diretamente.
+// execFileNoThrow usa cross-spawn, que resolve os shims .cmd/.bat no Windows
+// automaticamente (npm/code/antigravity-ide), então chamamos o binário direto.
 function runTool(
   bin: string,
   args: string[],
   timeout: number,
 ): ReturnType<typeof execFileNoThrow> {
-  if (isWindows) {
-    return execFileNoThrow('cmd.exe', ['/c', bin, ...args], {
-      timeout,
-      preserveOutputOnError: true,
-      useCwd: true,
-    })
-  }
   return execFileNoThrow(bin, args, {
     timeout,
     preserveOutputOnError: true,
@@ -37,7 +26,7 @@ function runTool(
 }
 
 function cliTarballUrl(): string {
-  return isWindows ? CLI_TGZ_WIN : CLI_TGZ_NIX
+  return process.platform === 'win32' ? CLI_TGZ_WIN : CLI_TGZ_NIX
 }
 
 async function updateCli(lines: string[]): Promise<void> {
