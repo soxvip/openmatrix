@@ -74,6 +74,27 @@ async function downloadVsix(lines: string[]): Promise<string | null> {
   }
 }
 
+const EXTENSION_ID = 'devnull-bootloader.open-matrix-vscode'
+
+// Lê a versão instalada da extensão a partir de `--list-extensions --show-versions`,
+// que retorna linhas no formato `publisher.nome@versao`.
+async function installedExtensionVersion(bin: string): Promise<string | null> {
+  const result = await runTool(
+    bin,
+    ['--list-extensions', '--show-versions'],
+    30 * SECONDS,
+  )
+  if (result.code !== 0) {
+    return null
+  }
+  const prefix = `${EXTENSION_ID}@`
+  const line = result.stdout
+    .split('\n')
+    .map(l => l.trim())
+    .find(l => l.startsWith(prefix))
+  return line ? line.slice(prefix.length) : null
+}
+
 async function updateExtensionFor(
   bin: string,
   label: string,
@@ -86,6 +107,7 @@ async function updateExtensionFor(
     lines.push(`• ${label}: não encontrado no PATH, ignorando.`)
     return
   }
+  const before = await installedExtensionVersion(bin)
   lines.push(`• Atualizando extensão no ${label} ...`)
   const result = await runTool(
     bin,
@@ -93,7 +115,18 @@ async function updateExtensionFor(
     STEP_TIMEOUT,
   )
   if (result.code === 0) {
-    lines.push(`  ✓ Extensão atualizada no ${label}.`)
+    const after = await installedExtensionVersion(bin)
+    if (before && after && before === after) {
+      lines.push(
+        `  ✓ Extensão reinstalada no ${label} (versão ${after} — sem mudança de versão; o .vsix do release pode estar defasado).`,
+      )
+    } else if (after) {
+      lines.push(
+        `  ✓ Extensão atualizada no ${label} (${before ?? '—'} → ${after}).`,
+      )
+    } else {
+      lines.push(`  ✓ Extensão atualizada no ${label}.`)
+    }
   } else {
     lines.push(
       `  ✗ Falha ao atualizar a extensão no ${label} (código ${result.code}). ${
@@ -123,8 +156,10 @@ export async function call(): Promise<LocalCommandResult> {
   await updateExtensions(lines)
 
   lines.push('')
+  lines.push('Concluído.')
+  lines.push('• Reinicie o CLI para usar a versão nova.')
   lines.push(
-    'Concluído. Reinicie o CLI (e recarregue a janela do editor) para usar a versão nova.',
+    '• No editor, recarregue a janela: Ctrl+Shift+P → "Developer: Reload Window" (a extensão só recarrega após isso).',
   )
 
   return { type: 'text', value: lines.join('\n') }
